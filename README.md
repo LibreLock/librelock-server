@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="public/logo.svg" alt="LibreLock logo" height="70" />
+  <img src="logo.svg" alt="LibreLock logo" height="70" />
   <h1 align="center">LibreLock Server</h1>
 </div>
 
