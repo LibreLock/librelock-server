@@ -22,7 +22,7 @@ To run without Docker first install Go and PostgreSQL, then set up a database an
 go run main.go
 ```
 
-The API is now running at [localhost:8000](http://localhost:8000/api). PostgreSQL data persists in a Docker volume across restarts.
+The API is now running at [localhost:8000](http://localhost:8000). PostgreSQL data persists in a Docker volume across restarts.
 
 ## Contributing
 

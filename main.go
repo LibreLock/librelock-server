@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http"
 	"reflect"
 	"strings"
 
@@ -49,9 +50,11 @@ func main() {
 
 	authMW := middleware.Auth(database)
 
-	api := r.Group("/api")
+	r.GET("/", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"message": "API is running"})
+	})
 
-	auth := api.Group("/auth")
+	auth := r.Group("/auth")
 	{
 		auth.GET("/kdf", authH.KDF)
 		auth.POST("/register", authH.Register)
@@ -60,7 +63,7 @@ func main() {
 		auth.GET("/me", authMW, authH.Me)
 	}
 
-	protected := api.Group("/", authMW)
+	protected := r.Group("/", authMW)
 	{
 		v := protected.Group("/vault")
 		v.GET("", vaultH.Index)
