@@ -7,16 +7,22 @@ REST API for LibreLock, a secure, self-hosted password manager. Built with [Go](
 
 ## Get started
 
-The preferable way to run LibreLock is via Docker Compose.
+Refer to _Get started_ section in this [README](https://github.com/LibreLock/) for one command setup of the entire application. Keep reading if you wish to run the backend separately.
+
+The preferable way to run LibreLock Server is via Docker Compose.
 
 ```bash
 cp .env.example .env  # then update with your DB credentials
 docker compose up -d --build
 ```
 
-The API is now running at [localhost:8000](http://localhost:8000/api). PostgreSQL data persists in a Docker volume across restarts.
+To run without Docker first install Go and PostgreSQL, then set up a database and user matching the one if `.env. Finally, run the server with:
 
-Refer to _Get started_ section in this [README](https://github.com/LibreLock/) for details.
+```bash
+go run main.go
+```
+
+The API is now running at [localhost:8000](http://localhost:8000/api). PostgreSQL data persists in a Docker volume across restarts.
 
 ## Contributing
 
