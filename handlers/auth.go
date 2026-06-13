@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -72,7 +73,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	h.db.Model(&models.User{}).Where("username = ?", strings.TrimSpace(req.Username)).Count(&count)
 	if count > 0 {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": map[string][]string{
-			"username": {"The username has already been taken."},
+			"username": {"User with this username already exists"},
 		}})
 		return
 	}
@@ -101,6 +102,12 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		ProtectedKey:   req.ProtectedKey,
 	}
 	if err := h.db.Create(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": map[string][]string{
+				"username": {"User with this username already exists"},
+			}})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 		return
 	}

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -38,12 +39,18 @@ func (h *SettingsHandler) UpdateUsername(c *gin.Context) {
 	h.db.Model(&models.User{}).Where("username = ?", newUsername).Count(&count)
 	if count > 0 {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": map[string][]string{
-			"username": {"The username has already been taken."},
+			"username": {"User with this username already exists"},
 		}})
 		return
 	}
 
 	if err := h.db.Model(user).UpdateColumn("username", newUsername).Error; err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": map[string][]string{
+				"username": {"User with this username already exists"},
+			}})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update username"})
 		return
 	}
