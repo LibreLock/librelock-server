@@ -73,7 +73,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	h.db.Model(&models.User{}).Where("username = ?", strings.TrimSpace(req.Username)).Count(&count)
 	if count > 0 {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": map[string][]string{
-			"username": {"User with this username already exists"},
+			"username": {"Username taken"},
 		}})
 		return
 	}
@@ -104,7 +104,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	if err := h.db.Create(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": map[string][]string{
-				"username": {"User with this username already exists"},
+				"username": {"Username taken"},
 			}})
 			return
 		}

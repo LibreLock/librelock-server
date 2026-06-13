@@ -39,7 +39,7 @@ func (h *SettingsHandler) UpdateUsername(c *gin.Context) {
 	h.db.Model(&models.User{}).Where("username = ?", newUsername).Count(&count)
 	if count > 0 {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": map[string][]string{
-			"username": {"User with this username already exists"},
+			"username": {"Username taken"},
 		}})
 		return
 	}
@@ -47,7 +47,7 @@ func (h *SettingsHandler) UpdateUsername(c *gin.Context) {
 	if err := h.db.Model(user).UpdateColumn("username", newUsername).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": map[string][]string{
-				"username": {"User with this username already exists"},
+				"username": {"Username taken"},
 			}})
 			return
 		}
