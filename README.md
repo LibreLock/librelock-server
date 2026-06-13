@@ -16,7 +16,7 @@ cp .env.example .env  # then update with your DB credentials
 docker compose up -d --build
 ```
 
-To run without Docker first install Go and PostgreSQL, then set up a database and user matching the one if `.env. Finally, run the server with:
+To run without Docker first install Go and PostgreSQL, then set up a database and user matching the one if `.env`. Finally, run the server with:
 
 ```bash
 go run main.go
