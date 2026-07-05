@@ -17,7 +17,7 @@ import (
 
 func main() {
 	cfg := config.Load()
-	database := db.Connect(cfg.DSN)
+	database := db.Connect(cfg.DBPath)
 
 	// Use JSON tag names in validation error messages
 	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {

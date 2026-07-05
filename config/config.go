@@ -1,14 +1,13 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"strconv"
 )
 
 type Config struct {
 	Port          string
-	DSN           string
+	DBPath        string
 	TokenTTL      int
 	AppEnv        string
 	AllowedOrigin string
@@ -17,25 +16,11 @@ type Config struct {
 func Load() *Config {
 	return &Config{
 		Port:          getEnv("PORT", "8000"),
-		DSN:           buildDSN(),
+		DBPath:        getEnv("DB_PATH", "data/librelock.db"),
 		TokenTTL:      getEnvInt("TOKEN_TTL", 3600),
 		AppEnv:        getEnv("APP_ENV", "development"),
 		AllowedOrigin: getEnv("ALLOWED_ORIGIN", "http://localhost:1401"),
 	}
-}
-
-func buildDSN() string {
-	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
-		return dsn
-	}
-	return fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable TimeZone=UTC",
-		getEnv("DB_HOST", "127.0.0.1"),
-		getEnv("DB_PORT", "5432"),
-		getEnv("DB_USER", "user"),
-		getEnv("DB_PASSWORD", "password"),
-		getEnv("DB_NAME", "librelock"),
-	)
 }
 
 func getEnv(key, fallback string) string {

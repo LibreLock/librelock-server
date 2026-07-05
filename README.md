@@ -3,7 +3,7 @@
   <h1 align="center">LibreLock Server</h1>
 </div>
 
-REST API for LibreLock, a secure, self-hosted password manager. Built with [Go](https://go.dev/) and [Gin](https://gin-gonic.com/), backed by [PostgreSQL](https://www.postgresql.org/).
+REST API for LibreLock, a secure, self-hosted password manager. Built with [Go](https://go.dev/) and [Gin](https://gin-gonic.com/), backed by [SQLite](https://sqlite.org/).
 
 ## Get started
 
@@ -12,17 +12,17 @@ Refer to _Get started_ section in this [README](https://github.com/LibreLock/) f
 The preferable way to run LibreLock Server is via Docker Compose.
 
 ```bash
-cp .env.example .env  # then update with your DB credentials
+cp .env.example .env
 docker compose up -d --build
 ```
 
-To run without Docker first install Go and PostgreSQL, then set up a database and user matching the one if `.env`. Finally, run the server with:
+To run without Docker just install Go, then run the server with:
 
 ```bash
 go run main.go
 ```
 
-The API is now running at [localhost:8000](http://localhost:8000). PostgreSQL data persists in a Docker volume across restarts.
+The API is now running at [localhost:8000](http://localhost:8000). The SQLite database file is created automatically at `DB_PATH` (a Docker volume when using Compose) and persists across restarts.
 
 ## Contributing
 

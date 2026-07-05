@@ -1,9 +1,14 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+)
 
 type User struct {
-	ID             string    `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
+	ID             string    `gorm:"primaryKey;type:text"                           json:"id"`
 	Username       string    `gorm:"uniqueIndex;size:200;not null"                  json:"username"`
 	AuthHash       string    `gorm:"not null"                                       json:"-"`
 	KDFAlgo        string    `gorm:"column:kdf_algo;size:50;not null;default:argon2id" json:"kdf_algo"`
@@ -17,3 +22,10 @@ type User struct {
 }
 
 func (User) TableName() string { return "user" }
+
+func (u *User) BeforeCreate(tx *gorm.DB) error {
+	if u.ID == "" {
+		u.ID = uuid.NewString()
+	}
+	return nil
+}
