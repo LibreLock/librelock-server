@@ -13,6 +13,9 @@ func publicUser(u *models.User) map[string]any {
 	return map[string]any{
 		"id":              u.ID,
 		"username":        u.Username,
+		"role":            u.Role,
+		"status":          u.Status,
+		"theme":           u.Theme,
 		"kdf_algo":        u.KDFAlgo,
 		"kdf_salt":        u.KDFSalt,
 		"kdf_iter":        u.KDFIter,

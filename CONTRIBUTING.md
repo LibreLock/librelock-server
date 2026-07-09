@@ -2,7 +2,7 @@
 
 ## Setting the environment
 
-Requirements: Go 1.25+, PostgreSQL 14+
+Requirements: Go 1.25+
 
 ```bash
 git clone <repo-url>

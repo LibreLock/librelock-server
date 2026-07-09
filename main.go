@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"net/http"
 	"reflect"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin/binding"
 	"github.com/go-playground/validator/v10"
 
+	"librelock-server/appmode"
 	"librelock-server/config"
 	"librelock-server/db"
 	"librelock-server/handlers"
@@ -18,6 +20,14 @@ import (
 func main() {
 	cfg := config.Load()
 	database := db.Connect(cfg.DBPath)
+
+	// Mode is persisted in the database and read live via the provider.
+	mode := appmode.New(database)
+	if mode.IsOrganization() {
+		db.MigrateOrg(database)
+		db.EnsureOrgOwner(database)
+	}
+	log.Printf("mode=%s", mode.Current())
 
 	// Use JSON tag names in validation error messages
 	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
@@ -42,17 +52,22 @@ func main() {
 	r.Use(middleware.MaxBodySize(1 << 20)) // 1 MiB
 	r.Use(middleware.CORS(cfg.AllowedOrigin))
 
-	authH := handlers.NewAuthHandler(database, cfg.TokenTTL, cfg.AppEnv)
+	authH := handlers.NewAuthHandler(database, cfg.TokenTTL, cfg.AppEnv, mode)
 	vaultH := handlers.NewVaultHandler(database)
 	categoryH := handlers.NewCategoryHandler(database)
-	settingsH := handlers.NewSettingsHandler(database, cfg.AppEnv)
+	settingsH := handlers.NewSettingsHandler(database, cfg.AppEnv, mode)
 	sessionH := handlers.NewSessionHandler(database)
+	orgH := handlers.NewOrganizationHandler(database, mode)
 
 	authMW := middleware.Auth(database)
 
 	r.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "API is running"})
 	})
+
+	// Public branding — frontend swaps logo/name on load.
+	r.GET("/organization", orgH.Show)
+	r.GET("/organization/logo", orgH.Logo)
 
 	auth := r.Group("/auth")
 	{
@@ -81,13 +96,29 @@ func main() {
 
 		s := protected.Group("/settings")
 		s.PUT("/username", settingsH.UpdateUsername)
+		s.PUT("/theme", settingsH.UpdateTheme)
 		s.PUT("/password", settingsH.UpdateMasterPassword)
 		s.DELETE("/account", settingsH.DeleteAccount)
+		s.PUT("/mode", settingsH.SwitchMode)
 
 		sess := protected.Group("/sessions")
 		sess.GET("", sessionH.Index)
 		sess.DELETE("", sessionH.DestroyAll)
 		sess.DELETE("/:id", sessionH.Destroy)
+
+		org := protected.Group("/organization", middleware.RequireAdmin(mode))
+		org.PUT("", orgH.Update)
+		org.PUT("/registration", orgH.UpdateRegistration)
+		org.PUT("/logo", orgH.UploadLogo)
+		org.DELETE("/logo", orgH.DeleteLogo)
+		org.GET("/users", orgH.ListUsers)
+		org.PUT("/users/:id/role", orgH.UpdateUserRole)
+		org.PUT("/users/:id/status", orgH.UpdateUserStatus)
+		org.DELETE("/users/:id", orgH.RemoveUser)
+		org.POST("/invites", orgH.CreateInvite)
+		org.GET("/invites", orgH.ListInvites)
+		org.DELETE("/invites/:id", orgH.RevokeInvite)
+		org.GET("/audit", orgH.ListAuditEvents)
 	}
 
 	r.Run(":" + cfg.Port)

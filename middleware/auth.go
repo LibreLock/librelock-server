@@ -41,6 +41,12 @@ func Auth(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
+		// A suspended user's live sessions must stop working immediately.
+		if user.Status == models.StatusSuspended {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Account suspended"})
+			return
+		}
+
 		c.Set(UserKey, &user)
 		c.Set(SessionIDKey, session.ID)
 		c.Set(TokenKey, token)

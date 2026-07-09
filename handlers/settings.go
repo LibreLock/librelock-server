@@ -8,18 +8,21 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"librelock-server/appmode"
+	"librelock-server/config"
 	"librelock-server/crypto"
 	"librelock-server/middleware"
 	"librelock-server/models"
 )
 
 type SettingsHandler struct {
-	db  *gorm.DB
-	env string
+	db   *gorm.DB
+	env  string
+	mode *appmode.Provider
 }
 
-func NewSettingsHandler(db *gorm.DB, env string) *SettingsHandler {
-	return &SettingsHandler{db: db, env: env}
+func NewSettingsHandler(db *gorm.DB, env string, mode *appmode.Provider) *SettingsHandler {
+	return &SettingsHandler{db: db, env: env, mode: mode}
 }
 
 type updateUsernameRequest struct {
@@ -55,6 +58,25 @@ func (h *SettingsHandler) UpdateUsername(c *gin.Context) {
 		return
 	}
 	user.Username = newUsername
+	c.JSON(http.StatusOK, gin.H{"user": publicUser(user)})
+}
+
+type updateThemeRequest struct {
+	Theme string `json:"theme" binding:"required,oneof=light dark"`
+}
+
+func (h *SettingsHandler) UpdateTheme(c *gin.Context) {
+	user := c.MustGet(middleware.UserKey).(*models.User)
+	var req updateThemeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": validationErrors(err)})
+		return
+	}
+	if err := h.db.Model(user).UpdateColumn("theme", req.Theme).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update theme"})
+		return
+	}
+	user.Theme = req.Theme
 	c.JSON(http.StatusOK, gin.H{"user": publicUser(user)})
 }
 
@@ -141,4 +163,81 @@ func (h *SettingsHandler) DeleteAccount(c *gin.Context) {
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie("token", "", -1, "/", "", h.env == "production", true)
 	c.JSON(http.StatusOK, gin.H{"message": "Account deleted"})
+}
+
+type switchModeRequest struct {
+	Mode string `json:"mode" binding:"required,oneof=personal organization"`
+	// Re-authenticates the owner for the destructive revert to personal.
+	AuthCredential string `json:"auth_credential"`
+}
+
+// SwitchMode enables organization mode (caller becomes owner) or, given
+// mode=personal, reverts to personal — see revertToPersonal.
+func (h *SettingsHandler) SwitchMode(c *gin.Context) {
+	user := c.MustGet(middleware.UserKey).(*models.User)
+
+	var req switchModeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": validationErrors(err)})
+		return
+	}
+
+	if req.Mode == config.ModePersonal {
+		h.revertToPersonal(c, user, req)
+		return
+	}
+
+	// Switch to organization mode.
+	if h.mode.IsOrganization() {
+		c.JSON(http.StatusOK, gin.H{"mode": h.mode.Current()})
+		return
+	}
+	if err := h.mode.EnableOrganization(user.ID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to switch to organization mode"})
+		return
+	}
+	recordAudit(h.db, AuditModeChanged, user, user.ID, user.Username, "switched to organization")
+	c.JSON(http.StatusOK, gin.H{"mode": h.mode.Current()})
+}
+
+// revertToPersonal is the destructive organization → personal downgrade:
+// owner-only, password-confirmed, deletes every other account and their data.
+func (h *SettingsHandler) revertToPersonal(c *gin.Context, user *models.User, req switchModeRequest) {
+	if !h.mode.IsOrganization() {
+		c.JSON(http.StatusOK, gin.H{"mode": h.mode.Current()})
+		return
+	}
+
+	if user.Role != models.RoleOwner {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Only the organization owner can do this"})
+		return
+	}
+
+	if req.AuthCredential == "" {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": map[string][]string{
+			"auth_credential": {"Password confirmation is required."},
+		}})
+		return
+	}
+	ok, err := crypto.VerifyPassword(req.AuthCredential, user.AuthHash)
+	if err != nil || !ok {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Invalid credentials"})
+		return
+	}
+
+	// FK cascade removes each deleted user's vault, categories, and sessions.
+	if err := h.db.Where("id != ?", user.ID).Delete(&models.User{}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove other accounts"})
+		return
+	}
+
+	h.db.Model(user).UpdateColumn("role", models.RoleMember)
+	user.Role = models.RoleMember
+
+	if err := h.mode.RevertToPersonal(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to switch to personal mode"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"mode": h.mode.Current()})
 }
