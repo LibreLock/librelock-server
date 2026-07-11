@@ -18,8 +18,7 @@ func SecurityHeaders() gin.HandlerFunc {
 	}
 }
 
-// Reject requests whose body exceeds limit bytes
-// Prevents memory-exhaustion DoS via oversized JSON payloads
+// Reject requests whose body exceeds limit bytes Prevents memory-exhaustion DoS via oversized JSON payloads
 func MaxBodySize(limit int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)

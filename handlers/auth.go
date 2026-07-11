@@ -9,26 +9,41 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"librelock-server/appmode"
 	"librelock-server/crypto"
 	"librelock-server/middleware"
 	"librelock-server/models"
 )
 
 type AuthHandler struct {
-	db  *gorm.DB
-	ttl int
-	env string
+	db   *gorm.DB
+	ttl  int
+	env  string
+	mode *appmode.Provider
 }
 
-func NewAuthHandler(db *gorm.DB, ttl int, env string) *AuthHandler {
-	return &AuthHandler{db: db, ttl: ttl, env: env}
+func NewAuthHandler(db *gorm.DB, ttl int, env string, mode *appmode.Provider) *AuthHandler {
+	return &AuthHandler{db: db, ttl: ttl, env: env, mode: mode}
+}
+
+// registrationPolicy reads the admin-set policy from the organization row, defaulting to invite-only if unset
+// Only meaningful in organization mode
+func (h *AuthHandler) registrationPolicy() string {
+	var org models.Organization
+	if err := h.db.First(&org, "id = ?", models.OrgSingletonID).Error; err != nil {
+		return models.RegistrationInvite
+	}
+	if org.Registration == models.RegistrationOpen {
+		return models.RegistrationOpen
+	}
+	return models.RegistrationInvite
 }
 
 func (h *AuthHandler) KDF(c *gin.Context) {
 	username := strings.TrimSpace(c.Query("username"))
 	var user models.User
 	if err := h.db.Where("username = ?", username).First(&user).Error; err != nil {
-		// Don't reveal the user doesn't exist — return plausible defaults.
+		// Don't reveal the user doesn't exist; return plausible defaults
 		c.JSON(http.StatusOK, gin.H{
 			"kdf_algo":        "argon2id",
 			"kdf_salt":        crypto.IssueToken()[:32],
@@ -48,7 +63,7 @@ func (h *AuthHandler) KDF(c *gin.Context) {
 }
 
 type registerRequest struct {
-	Username       string              `json:"username"        binding:"required,max=200"`
+	Username       string              `json:"username"        binding:"required,max=500"`
 	AuthCredential string              `json:"auth_credential" binding:"required,min=32,max=512"`
 	ProtectedKey   string              `json:"protected_key"   binding:"required,min=32,max=1024"`
 	KDFSalt        string              `json:"kdf_salt"        binding:"required,min=16,max=512"`
@@ -56,6 +71,12 @@ type registerRequest struct {
 	KDFMemory      int                 `json:"kdf_memory"      binding:"required,min=8192,max=1048576"`
 	KDFParallelism int                 `json:"kdf_parallelism" binding:"required,min=1,max=16"`
 	Categories     []categoryNameInput `json:"categories"`
+	InviteToken    string              `json:"invite_token"`
+	Theme          string              `json:"theme" binding:"omitempty,oneof=light dark"`
+	// Sharing keypair
+	// Optional for older clients; new clients always send both
+	PublicKey           string `json:"public_key"            binding:"omitempty,max=4096"`
+	EncryptedPrivateKey string `json:"encrypted_private_key" binding:"omitempty,max=8192"`
 }
 
 type categoryNameInput struct {
@@ -91,15 +112,46 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
+	// Org mode: the first account becomes owner; afterwards invite mode requires a valid token
+	// Personal mode leaves the role at its (unused) default
+	role := models.RoleMember
+	var consumedInvite *models.Invite
+	if h.mode.IsOrganization() {
+		var userCount int64
+		h.db.Model(&models.User{}).Count(&userCount)
+		if userCount == 0 {
+			role = models.RoleOwner // founder
+		} else if h.registrationPolicy() == models.RegistrationInvite {
+			inv, ok := h.findValidInvite(req.InviteToken)
+			if !ok {
+				c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": map[string][]string{
+					"invite_token": {"This invite is invalid, expired, or already used."},
+				}})
+				return
+			}
+			consumedInvite = inv
+		}
+	}
+
+	// Client sends the OS/browser-resolved theme at sign-up
+	theme := req.Theme
+	if theme == "" {
+		theme = "dark"
+	}
+
 	user := models.User{
-		Username:       strings.TrimSpace(req.Username),
-		AuthHash:       authHash,
-		KDFAlgo:        "argon2id",
-		KDFSalt:        req.KDFSalt,
-		KDFIter:        req.KDFIter,
-		KDFMemory:      req.KDFMemory,
-		KDFParallelism: req.KDFParallelism,
-		ProtectedKey:   req.ProtectedKey,
+		Username:            strings.TrimSpace(req.Username),
+		Role:                role,
+		Theme:               theme,
+		AuthHash:            authHash,
+		KDFAlgo:             "argon2id",
+		KDFSalt:             req.KDFSalt,
+		KDFIter:             req.KDFIter,
+		KDFMemory:           req.KDFMemory,
+		KDFParallelism:      req.KDFParallelism,
+		ProtectedKey:        req.ProtectedKey,
+		PublicKey:           req.PublicKey,
+		EncryptedPrivateKey: req.EncryptedPrivateKey,
 	}
 	if err := h.db.Create(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) {
@@ -110,6 +162,16 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 		return
+	}
+
+	// Burn the invite now that the account exists
+	if consumedInvite != nil {
+		now := time.Now()
+		h.db.Model(consumedInvite).Update("used_at", &now)
+	}
+
+	if h.mode.IsOrganization() {
+		recordAudit(h.db, AuditUserRegistered, &user, user.ID, user.Username, "role: "+role)
 	}
 
 	for _, cat := range req.Categories {
@@ -152,6 +214,12 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	// Checked after password verification so suspension isn't a login oracle
+	if user.Status == models.StatusSuspended {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Your account has been suspended."})
+		return
+	}
+
 	token := crypto.IssueToken()
 	if err := h.createSession(&user, token, c); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create session"})
@@ -173,6 +241,21 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 func (h *AuthHandler) Me(c *gin.Context) {
 	user := c.MustGet(middleware.UserKey).(*models.User)
 	c.JSON(http.StatusOK, gin.H{"user": publicUser(user)})
+}
+
+// findValidInvite returns the invite matching the raw token if it is unused and unexpired
+func (h *AuthHandler) findValidInvite(token string) (*models.Invite, bool) {
+	if token == "" {
+		return nil, false
+	}
+	var inv models.Invite
+	if err := h.db.Where("token_hash = ?", crypto.HashToken(token)).First(&inv).Error; err != nil {
+		return nil, false
+	}
+	if !inv.IsValid() {
+		return nil, false
+	}
+	return &inv, true
 }
 
 func (h *AuthHandler) createSession(user *models.User, token string, c *gin.Context) error {
