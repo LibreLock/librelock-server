@@ -21,7 +21,7 @@ func main() {
 	cfg := config.Load()
 	database := db.Connect(cfg.DBPath)
 
-	// Mode is persisted in the database and read live via the provider.
+	// Mode is persisted in the database and read live via the provider
 	mode := appmode.New(database)
 	if mode.IsOrganization() {
 		db.MigrateOrg(database)
@@ -54,18 +54,21 @@ func main() {
 
 	authH := handlers.NewAuthHandler(database, cfg.TokenTTL, cfg.AppEnv, mode)
 	vaultH := handlers.NewVaultHandler(database)
+	orgVaultH := handlers.NewOrgVaultHandler(database)
+	orgCategoryH := handlers.NewOrgCategoryHandler(database)
 	categoryH := handlers.NewCategoryHandler(database)
 	settingsH := handlers.NewSettingsHandler(database, cfg.AppEnv, mode)
 	sessionH := handlers.NewSessionHandler(database)
 	orgH := handlers.NewOrganizationHandler(database, mode)
 
-	authMW := middleware.Auth(database)
+	authMW := middleware.Auth(database, cfg.TokenTTL, cfg.AppEnv)
 
 	r.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "API is running"})
 	})
 
-	// Public branding — frontend swaps logo/name on load.
+	// Public branding
+	// The frontend swaps logo/name on load
 	r.GET("/organization", orgH.Show)
 	r.GET("/organization/logo", orgH.Logo)
 
@@ -98,6 +101,7 @@ func main() {
 		s.PUT("/username", settingsH.UpdateUsername)
 		s.PUT("/theme", settingsH.UpdateTheme)
 		s.PUT("/password", settingsH.UpdateMasterPassword)
+		s.PUT("/keypair", settingsH.UploadKeypair)
 		s.DELETE("/account", settingsH.DeleteAccount)
 		s.PUT("/mode", settingsH.SwitchMode)
 
@@ -106,9 +110,28 @@ func main() {
 		sess.DELETE("", sessionH.DestroyAll)
 		sess.DELETE("/:id", sessionH.Destroy)
 
+		// Member-facing: fetch own wrapped shared-vault key
+		protected.GET("/org/shared-key", orgH.MyOrgKey)
+
+		ov := protected.Group("/org-vault", middleware.RequireMembership(database, mode))
+		ov.GET("", orgVaultH.Index)
+		ov.POST("", orgVaultH.Store)
+		ov.GET("/:id", orgVaultH.Show)
+		ov.PUT("/:id", orgVaultH.Update)
+		ov.DELETE("/:id", orgVaultH.Destroy)
+
+		// Shared categories: any member reads; only admins write (checked in the handler, since writers also need membership to hold the org key)
+		oc := protected.Group("/org-categories", middleware.RequireMembership(database, mode))
+		oc.GET("", orgCategoryH.Index)
+		oc.POST("", orgCategoryH.Store)
+		oc.GET("/:id", orgCategoryH.Show)
+		oc.PUT("/:id", orgCategoryH.Update)
+		oc.DELETE("/:id", orgCategoryH.Destroy)
+
 		org := protected.Group("/organization", middleware.RequireAdmin(mode))
 		org.PUT("", orgH.Update)
 		org.PUT("/registration", orgH.UpdateRegistration)
+		org.PUT("/shared-settings", orgH.UpdateSharedSettings)
 		org.PUT("/logo", orgH.UploadLogo)
 		org.DELETE("/logo", orgH.DeleteLogo)
 		org.GET("/users", orgH.ListUsers)
@@ -117,8 +140,12 @@ func main() {
 		org.DELETE("/users/:id", orgH.RemoveUser)
 		org.POST("/invites", orgH.CreateInvite)
 		org.GET("/invites", orgH.ListInvites)
+		org.DELETE("/invites", orgH.PruneInvites)
 		org.DELETE("/invites/:id", orgH.RevokeInvite)
 		org.GET("/audit", orgH.ListAuditEvents)
+		org.GET("/memberships", orgH.ListMemberships)
+		org.POST("/memberships", orgH.GrantMembership)
+		org.DELETE("/memberships/:userId", orgH.RevokeMembership)
 	}
 
 	r.Run(":" + cfg.Port)

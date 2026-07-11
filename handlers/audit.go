@@ -11,24 +11,27 @@ import (
 	"librelock-server/models"
 )
 
-// Audit action identifiers.
+// Audit action identifiers
 const (
-	AuditUserRegistered       = "user.registered"
-	AuditUserRoleChanged      = "user.role_changed"
-	AuditOwnershipTransferred = "user.ownership_transferred"
-	AuditUserSuspended        = "user.suspended"
-	AuditUserReactivated      = "user.reactivated"
-	AuditUserRemoved          = "user.removed"
-	AuditInviteCreated        = "invite.created"
-	AuditInviteRevoked        = "invite.revoked"
-	AuditOrgUpdated           = "org.updated"
-	AuditOrgLogoUpdated       = "org.logo_updated"
-	AuditOrgLogoRemoved       = "org.logo_removed"
-	AuditRegistrationChanged  = "org.registration_changed"
-	AuditModeChanged          = "app.mode_changed"
+	AuditUserRegistered        = "user.registered"
+	AuditUserRoleChanged       = "user.role_changed"
+	AuditOwnershipTransferred  = "user.ownership_transferred"
+	AuditUserSuspended         = "user.suspended"
+	AuditUserReactivated       = "user.reactivated"
+	AuditUserRemoved           = "user.removed"
+	AuditInviteCreated         = "invite.created"
+	AuditInviteRevoked         = "invite.revoked"
+	AuditOrgUpdated            = "org.updated"
+	AuditOrgLogoUpdated        = "org.logo_updated"
+	AuditOrgLogoRemoved        = "org.logo_removed"
+	AuditRegistrationChanged   = "org.registration_changed"
+	AuditModeChanged           = "app.mode_changed"
+	AuditSharedAccessGranted   = "org.shared_access_granted"
+	AuditSharedAccessRevoked   = "org.shared_access_revoked"
+	AuditSharedSettingsChanged = "org.shared_settings_changed"
 )
 
-// recordAudit writes a best-effort audit entry; a failure is logged, never surfaced.
+// recordAudit writes a best-effort audit entry; a failure is logged, never surfaced
 func recordAudit(db *gorm.DB, action string, actor *models.User, targetID, targetName, detail string) {
 	ev := models.AuditEvent{
 		Action:     action,
@@ -58,7 +61,7 @@ func auditSummary(a *models.AuditEvent) map[string]any {
 	}
 }
 
-// ListAuditEvents returns recent audit entries newest first (admin only).
+// ListAuditEvents returns recent audit entries newest first (admin only)
 func (h *OrganizationHandler) ListAuditEvents(c *gin.Context) {
 	limit := 100
 	if v := c.Query("limit"); v != "" {

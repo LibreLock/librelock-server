@@ -9,8 +9,8 @@ import (
 	"librelock-server/models"
 )
 
-// RequireAdmin permits admins (owner included) in organization mode only.
-// Reads the mode live and must run after Auth.
+// RequireAdmin permits admins (owner included) in organization mode only
+// Reads the mode live and must run after Auth
 func RequireAdmin(mode *appmode.Provider) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !mode.IsOrganization() {

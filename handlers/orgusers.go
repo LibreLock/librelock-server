@@ -17,10 +17,12 @@ func userSummary(u *models.User) map[string]any {
 		"role":       u.Role,
 		"status":     u.Status,
 		"created_at": u.CreatedAt,
+		// Whether the user can receive shared access yet (has a sharing keypair)
+		"has_public_key": u.PublicKey != "",
 	}
 }
 
-// countActiveAdmins counts logged-in-able admins (owner included) for last-admin guards.
+// countActiveAdmins counts logged-in-able admins (owner included) for last-admin guards
 func (h *OrganizationHandler) countActiveAdmins() int64 {
 	var n int64
 	h.db.Model(&models.User{}).
@@ -30,7 +32,7 @@ func (h *OrganizationHandler) countActiveAdmins() int64 {
 	return n
 }
 
-// guardOwner blocks user-management actions against the (protected) owner account.
+// guardOwner blocks user-management actions against the (protected) owner account
 func guardOwner(c *gin.Context, target *models.User) bool {
 	if target.Role == models.RoleOwner {
 		c.JSON(http.StatusForbidden, gin.H{"error": "The owner account cannot be modified"})
@@ -39,7 +41,7 @@ func guardOwner(c *gin.Context, target *models.User) bool {
 	return true
 }
 
-// ListUsers returns every account (admin only).
+// ListUsers returns every account (admin only)
 func (h *OrganizationHandler) ListUsers(c *gin.Context) {
 	var users []models.User
 	if err := h.db.Order("created_at asc").Find(&users).Error; err != nil {
@@ -57,7 +59,7 @@ type updateRoleRequest struct {
 	Role string `json:"role" binding:"required,oneof=owner admin member"`
 }
 
-// UpdateUserRole promotes/demotes a user; role "owner" is an ownership transfer.
+// UpdateUserRole promotes/demotes a user; role "owner" is an ownership transfer
 func (h *OrganizationHandler) UpdateUserRole(c *gin.Context) {
 	var req updateRoleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -99,7 +101,7 @@ func (h *OrganizationHandler) UpdateUserRole(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"user": userSummary(target)})
 }
 
-// transferOwnership atomically makes target the owner and demotes the caller to admin.
+// transferOwnership atomically makes target the owner and demotes the caller to admin
 func (h *OrganizationHandler) transferOwnership(c *gin.Context, actor, target *models.User) {
 	if actor.Role != models.RoleOwner {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Only the owner can transfer ownership"})
@@ -132,7 +134,7 @@ type updateStatusRequest struct {
 	Status string `json:"status" binding:"required,oneof=active suspended"`
 }
 
-// UpdateUserStatus suspends (keeps the vault, kills sessions) or reactivates a user.
+// UpdateUserStatus suspends (keeps the vault, kills sessions) or reactivates a user
 func (h *OrganizationHandler) UpdateUserStatus(c *gin.Context) {
 	var req updateStatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -165,7 +167,7 @@ func (h *OrganizationHandler) UpdateUserStatus(c *gin.Context) {
 	actor := c.MustGet(middleware.UserKey).(*models.User)
 
 	if req.Status == models.StatusSuspended {
-		// Force logout everywhere so suspension is immediate, not next-login.
+		// Force logout everywhere so suspension is immediate, not next-login
 		h.db.Where("user_id = ?", target.ID).Delete(&models.Session{})
 		recordAudit(h.db, AuditUserSuspended, actor, target.ID, target.Username, "")
 	} else {
@@ -174,7 +176,7 @@ func (h *OrganizationHandler) UpdateUserStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"user": userSummary(target)})
 }
 
-// RemoveUser deletes a user and cascade-deletes all their data.
+// RemoveUser deletes a user and cascade-deletes all their data
 func (h *OrganizationHandler) RemoveUser(c *gin.Context) {
 	target, ok := h.findUser(c)
 	if !ok {
@@ -199,7 +201,7 @@ func (h *OrganizationHandler) RemoveUser(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// findUser loads the :id user, writing the error response if not found.
+// findUser loads the :id user, writing the error response if not found
 func (h *OrganizationHandler) findUser(c *gin.Context) (*models.User, bool) {
 	current := c.MustGet(middleware.UserKey).(*models.User)
 	id := c.Param("id")

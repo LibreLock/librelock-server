@@ -22,8 +22,11 @@ func publicUser(u *models.User) map[string]any {
 		"kdf_memory":      u.KDFMemory,
 		"kdf_parallelism": u.KDFParallelism,
 		"protected_key":   u.ProtectedKey,
-		"created_at":      u.CreatedAt,
-		"updated_at":      u.UpdatedAt,
+		"public_key":      u.PublicKey,
+		// encrypted_private_key is wrapped by the user's password key; only the account owner can decrypt it, so returning it to that user is safe
+		"encrypted_private_key": u.EncryptedPrivateKey,
+		"created_at":            u.CreatedAt,
+		"updated_at":            u.UpdatedAt,
 	}
 }
 

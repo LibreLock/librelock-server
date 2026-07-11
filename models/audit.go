@@ -7,8 +7,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// AuditEvent records an admin action. Actor/target names are snapshotted so
-// entries survive the referenced user being deleted.
+// AuditEvent records an admin action Actor/target names are snapshotted so entries survive the referenced user being deleted
 type AuditEvent struct {
 	ID         string    `gorm:"primaryKey;type:text"    json:"id"`
 	Action     string    `gorm:"size:60;not null;index"  json:"action"`

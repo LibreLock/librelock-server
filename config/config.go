@@ -5,7 +5,8 @@ import (
 	"strconv"
 )
 
-// Deployment modes. The active mode lives in the DB (app_state), read via appmode.
+// Deployment modes
+// The active mode lives in the DB (app_state), read via appmode
 const (
 	ModePersonal     = "personal"
 	ModeOrganization = "organization"

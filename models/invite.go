@@ -7,8 +7,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// Invite is a single-use registration token for organization invite mode.
-// Only the SHA-256 hash of the token is stored; the raw token is shown once.
+// Invite is a single-use registration token for organization invite modew
+// Only the SHA-256 hash of the token is stored; the raw token is shown once
 type Invite struct {
 	ID        string     `gorm:"primaryKey;type:text"          json:"id"`
 	TokenHash string     `gorm:"uniqueIndex;not null"          json:"-"`

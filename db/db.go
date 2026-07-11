@@ -33,7 +33,7 @@ func Connect(path string) *gorm.DB {
 		log.Fatalf("db connect: %v", err)
 	}
 
-	// Core tables only; org-only tables are added by MigrateOrg when in org mode.
+	// Core tables only; org-only tables are added by MigrateOrg when in org mode
 	if err := db.AutoMigrate(
 		&models.User{},
 		&models.Category{},
@@ -47,23 +47,27 @@ func Connect(path string) *gorm.DB {
 	return db
 }
 
-// MigrateOrg creates the organization-only tables. Safe to call repeatedly.
+// MigrateOrg creates the organization-only tables
+// Safe to call repeatedly
+// The list must mirror appmode.EnableOrganization so a boot in org mode and a runtime switch produce the same schema
 func MigrateOrg(db *gorm.DB) {
 	if err := db.AutoMigrate(
 		&models.Organization{},
 		&models.Invite{},
 		&models.AuditEvent{},
+		&models.OrgVaultMembership{},
+		&models.OrgCategory{},
+		&models.OrgVault{},
 	); err != nil {
 		log.Fatalf("db migrate org: %v", err)
 	}
 
-	// Drop columns removed from models (AutoMigrate never drops). Done with raw
-	// SQL because GORM's Migrator resolves the column against struct fields,
-	// which no longer exist once the field is deleted.
+	// Drop columns removed from models (AutoMigrate never drops)
+	// Done with raw SQL because GORM's Migrator resolves the column against struct fields, which no longer exist once the field is deleted
 	dropColumn(db, "organization", "primary_color")
 }
 
-// EnsureOrgOwner promotes the oldest user to owner if the instance has none.
+// EnsureOrgOwner promotes the oldest user to owner if the instance has none
 func EnsureOrgOwner(db *gorm.DB) {
 	var owners int64
 	db.Model(&models.User{}).Where("role = ?", models.RoleOwner).Count(&owners)
@@ -81,7 +85,7 @@ func EnsureOrgOwner(db *gorm.DB) {
 	log.Printf("bootstrap: promoted %q to owner", user.Username)
 }
 
-// dropColumn removes a column if the table and column exist (SQLite 3.35+).
+// dropColumn removes a column if the table and column exist (SQLite 3.35+)
 func dropColumn(db *gorm.DB, table, column string) {
 	var n int64
 	db.Raw(

@@ -34,7 +34,7 @@ func NewOrganizationHandler(db *gorm.DB, mode *appmode.Provider) *OrganizationHa
 	return &OrganizationHandler{db: db, mode: mode}
 }
 
-// getOrCreate returns the singleton org row, creating a default one if absent.
+// getOrCreate returns the singleton org row, creating a default one if absent
 func (h *OrganizationHandler) getOrCreate() (*models.Organization, error) {
 	var org models.Organization
 	err := h.db.First(&org, "id = ?", models.OrgSingletonID).Error
@@ -66,30 +66,31 @@ func publicOrg(o *models.Organization) map[string]any {
 	}
 }
 
-// orgPayload is publicOrg plus mode/registration the frontend needs on every response.
+// orgPayload is publicOrg plus mode/registration the frontend needs on every response
 func (h *OrganizationHandler) orgPayload(o *models.Organization) map[string]any {
 	p := publicOrg(o)
 	p["mode"] = h.mode.Current()
 	p["registration"] = registrationOrDefault(o.Registration)
+	p["auto_grant_shared"] = o.AutoGrantShared
 	return p
 }
 
-// personalPayload is the branding response for a personal instance: plain
-// LibreLock, no org row touched (the organization table may not even exist).
+// personalPayload is the branding response for a personal instance: plain LibreLock, no org row touched (the organization table may not even exist)
 func personalPayload() map[string]any {
 	return map[string]any{
-		"name":            "LibreLock",
-		"support_email":   "",
-		"support_url":     "",
-		"login_message":   "",
-		"has_logo":        false,
-		"logo_updated_at": time.Time{},
-		"mode":            config.ModePersonal,
-		"registration":    models.RegistrationOpen,
+		"name":              "LibreLock",
+		"support_email":     "",
+		"support_url":       "",
+		"login_message":     "",
+		"has_logo":          false,
+		"logo_updated_at":   time.Time{},
+		"mode":              config.ModePersonal,
+		"registration":      models.RegistrationOpen,
+		"auto_grant_shared": false,
 	}
 }
 
-// registrationOrDefault normalises a possibly-empty stored value.
+// registrationOrDefault normalises a possibly-empty stored value
 func registrationOrDefault(v string) string {
 	if v == models.RegistrationOpen {
 		return models.RegistrationOpen
@@ -97,7 +98,7 @@ func registrationOrDefault(v string) string {
 	return models.RegistrationInvite
 }
 
-// Show is public — the frontend calls it on load to swap branding.
+// Show is public; the frontend calls it on load to swap branding
 func (h *OrganizationHandler) Show(c *gin.Context) {
 	if !h.mode.IsOrganization() {
 		c.JSON(http.StatusOK, gin.H{"organization": personalPayload()})
@@ -111,7 +112,7 @@ func (h *OrganizationHandler) Show(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"organization": h.orgPayload(org)})
 }
 
-// Logo is public — serves the raw logo bytes for <img> tags.
+// Logo is public; serves the raw logo bytes for <img> tags
 func (h *OrganizationHandler) Logo(c *gin.Context) {
 	if !h.mode.IsOrganization() {
 		c.Status(http.StatusNotFound)
@@ -122,8 +123,7 @@ func (h *OrganizationHandler) Logo(c *gin.Context) {
 		c.Status(http.StatusNotFound)
 		return
 	}
-	// Public branding asset embedded by the web app on a different origin,
-	// so relax the global same-origin resource policy for this response.
+	// Public branding asset embedded by the web app on a different origin, so relax the global same-origin resource policy for this response
 	c.Header("Cross-Origin-Resource-Policy", "cross-origin")
 	c.Header("Cache-Control", "no-cache")
 	c.Data(http.StatusOK, org.LogoMimeType, org.LogoData)
@@ -136,7 +136,7 @@ type updateOrgRequest struct {
 	LoginMessage *string `json:"login_message" binding:"omitempty,max=500"`
 }
 
-// Update edits branding fields (auth required).
+// Update edits branding fields (auth required)
 func (h *OrganizationHandler) Update(c *gin.Context) {
 	var req updateOrgRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -185,7 +185,7 @@ type uploadLogoRequest struct {
 	Data string `json:"data" binding:"required"`
 }
 
-// UploadLogo stores a new logo from a base64 data URL (auth required).
+// UploadLogo stores a new logo from a base64 data URL (auth required)
 func (h *OrganizationHandler) UploadLogo(c *gin.Context) {
 	var req uploadLogoRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -224,7 +224,7 @@ func (h *OrganizationHandler) UploadLogo(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"organization": h.orgPayload(org)})
 }
 
-// DeleteLogo resets branding back to the default LibreLock padlock.
+// DeleteLogo resets branding back to the default LibreLock padlock
 func (h *OrganizationHandler) DeleteLogo(c *gin.Context) {
 	org, err := h.getOrCreate()
 	if err != nil {
@@ -249,7 +249,7 @@ type updateRegistrationRequest struct {
 	Registration string `json:"registration" binding:"required,oneof=open invite"`
 }
 
-// UpdateRegistration toggles invite-only vs open sign-up (audited).
+// UpdateRegistration toggles invite-only vs open sign-up (audited)
 func (h *OrganizationHandler) UpdateRegistration(c *gin.Context) {
 	var req updateRegistrationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -275,7 +275,38 @@ func (h *OrganizationHandler) UpdateRegistration(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"organization": h.orgPayload(org)})
 }
 
-// parseDataURL splits "data:<mime>;base64,<payload>" into mime + decoded bytes.
+type updateSharedSettingsRequest struct {
+	AutoGrantShared *bool `json:"auto_grant_shared" binding:"required"`
+}
+
+// UpdateSharedSettings toggles automatic shared-vault access for new members (admin/owner)
+// The grant itself is performed client-side by a key holder
+func (h *OrganizationHandler) UpdateSharedSettings(c *gin.Context) {
+	var req updateSharedSettingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": validationErrors(err)})
+		return
+	}
+	org, err := h.getOrCreate()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load organization"})
+		return
+	}
+	if err := h.db.Model(org).UpdateColumn("auto_grant_shared", *req.AutoGrantShared).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update settings"})
+		return
+	}
+	org.AutoGrantShared = *req.AutoGrantShared
+	actor := c.MustGet(middleware.UserKey).(*models.User)
+	detail := "disabled"
+	if *req.AutoGrantShared {
+		detail = "enabled"
+	}
+	recordAudit(h.db, AuditSharedSettingsChanged, actor, "", "", "auto-grant "+detail)
+	c.JSON(http.StatusOK, gin.H{"organization": h.orgPayload(org)})
+}
+
+// parseDataURL splits "data:<mime>;base64,<payload>" into mime + decoded bytes
 func parseDataURL(s string) (mime string, data []byte, ok bool) {
 	if !strings.HasPrefix(s, "data:") {
 		return "", nil, false

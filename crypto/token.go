@@ -14,8 +14,8 @@ func IssueToken() string {
 
 const codeAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
-// IssueCode returns an n-character random alphanumeric string. Uses rejection
-// sampling so every character is uniformly distributed (no modulo bias).
+// IssueCode returns an n-character random alphanumeric string
+// Uses rejection sampling so every character is uniformly distributed (no modulo bias)
 func IssueCode(n int) string {
 	out := make([]byte, n)
 	buf := make([]byte, 1)

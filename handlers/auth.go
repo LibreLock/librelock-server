@@ -26,8 +26,8 @@ func NewAuthHandler(db *gorm.DB, ttl int, env string, mode *appmode.Provider) *A
 	return &AuthHandler{db: db, ttl: ttl, env: env, mode: mode}
 }
 
-// registrationPolicy reads the admin-set policy from the organization row,
-// defaulting to invite-only if unset. Only meaningful in organization mode.
+// registrationPolicy reads the admin-set policy from the organization row, defaulting to invite-only if unset
+// Only meaningful in organization mode
 func (h *AuthHandler) registrationPolicy() string {
 	var org models.Organization
 	if err := h.db.First(&org, "id = ?", models.OrgSingletonID).Error; err != nil {
@@ -43,7 +43,7 @@ func (h *AuthHandler) KDF(c *gin.Context) {
 	username := strings.TrimSpace(c.Query("username"))
 	var user models.User
 	if err := h.db.Where("username = ?", username).First(&user).Error; err != nil {
-		// Don't reveal the user doesn't exist — return plausible defaults.
+		// Don't reveal the user doesn't exist; return plausible defaults
 		c.JSON(http.StatusOK, gin.H{
 			"kdf_algo":        "argon2id",
 			"kdf_salt":        crypto.IssueToken()[:32],
@@ -63,7 +63,7 @@ func (h *AuthHandler) KDF(c *gin.Context) {
 }
 
 type registerRequest struct {
-	Username       string              `json:"username"        binding:"required,max=200"`
+	Username       string              `json:"username"        binding:"required,max=500"`
 	AuthCredential string              `json:"auth_credential" binding:"required,min=32,max=512"`
 	ProtectedKey   string              `json:"protected_key"   binding:"required,min=32,max=1024"`
 	KDFSalt        string              `json:"kdf_salt"        binding:"required,min=16,max=512"`
@@ -73,6 +73,10 @@ type registerRequest struct {
 	Categories     []categoryNameInput `json:"categories"`
 	InviteToken    string              `json:"invite_token"`
 	Theme          string              `json:"theme" binding:"omitempty,oneof=light dark"`
+	// Sharing keypair
+	// Optional for older clients; new clients always send both
+	PublicKey           string `json:"public_key"            binding:"omitempty,max=4096"`
+	EncryptedPrivateKey string `json:"encrypted_private_key" binding:"omitempty,max=8192"`
 }
 
 type categoryNameInput struct {
@@ -108,8 +112,8 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	// Org mode: the first account becomes owner; afterwards invite mode requires
-	// a valid token. Personal mode leaves the role at its (unused) default.
+	// Org mode: the first account becomes owner; afterwards invite mode requires a valid token
+	// Personal mode leaves the role at its (unused) default
 	role := models.RoleMember
 	var consumedInvite *models.Invite
 	if h.mode.IsOrganization() {
@@ -129,23 +133,25 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		}
 	}
 
-	// Client sends the OS/browser-resolved theme at sign-up.
+	// Client sends the OS/browser-resolved theme at sign-up
 	theme := req.Theme
 	if theme == "" {
 		theme = "dark"
 	}
 
 	user := models.User{
-		Username:       strings.TrimSpace(req.Username),
-		Role:           role,
-		Theme:          theme,
-		AuthHash:       authHash,
-		KDFAlgo:        "argon2id",
-		KDFSalt:        req.KDFSalt,
-		KDFIter:        req.KDFIter,
-		KDFMemory:      req.KDFMemory,
-		KDFParallelism: req.KDFParallelism,
-		ProtectedKey:   req.ProtectedKey,
+		Username:            strings.TrimSpace(req.Username),
+		Role:                role,
+		Theme:               theme,
+		AuthHash:            authHash,
+		KDFAlgo:             "argon2id",
+		KDFSalt:             req.KDFSalt,
+		KDFIter:             req.KDFIter,
+		KDFMemory:           req.KDFMemory,
+		KDFParallelism:      req.KDFParallelism,
+		ProtectedKey:        req.ProtectedKey,
+		PublicKey:           req.PublicKey,
+		EncryptedPrivateKey: req.EncryptedPrivateKey,
 	}
 	if err := h.db.Create(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) {
@@ -158,7 +164,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	// Burn the invite now that the account exists.
+	// Burn the invite now that the account exists
 	if consumedInvite != nil {
 		now := time.Now()
 		h.db.Model(consumedInvite).Update("used_at", &now)
@@ -208,7 +214,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// Checked after password verification so suspension isn't a login oracle.
+	// Checked after password verification so suspension isn't a login oracle
 	if user.Status == models.StatusSuspended {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Your account has been suspended."})
 		return
@@ -237,8 +243,7 @@ func (h *AuthHandler) Me(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"user": publicUser(user)})
 }
 
-// findValidInvite returns the invite matching the raw token if it is unused and
-// unexpired.
+// findValidInvite returns the invite matching the raw token if it is unused and unexpired
 func (h *AuthHandler) findValidInvite(token string) (*models.Invite, bool) {
 	if token == "" {
 		return nil, false

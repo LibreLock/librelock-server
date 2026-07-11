@@ -1,5 +1,4 @@
-// Package appmode holds the live deployment mode (personal vs organization),
-// persisted in the database so it can be switched on a running instance.
+// Package appmode holds the live deployment mode (personal vs organization), persisted in the database so it can be switched on a running instance
 package appmode
 
 import (
@@ -28,7 +27,7 @@ func New(db *gorm.DB) *Provider {
 			p.mode = config.ModeOrganization
 		}
 	case db.Migrator().HasTable("organization"):
-		// Legacy org DB from before app_state existed: adopt org mode once.
+		// Legacy org DB from before app_state existed: adopt org mode once
 		p.mode = config.ModeOrganization
 		p.persist(config.ModeOrganization)
 	}
@@ -46,8 +45,8 @@ func (p *Provider) IsOrganization() bool {
 	return p.Current() == config.ModeOrganization
 }
 
-// EnableOrganization creates the org-only tables, makes the acting user the
-// owner, seeds the branding row, and persists the mode. No-op if already org.
+// EnableOrganization creates the org-only tables, makes the acting user the owner, seeds the branding row, and persists the mode
+// No-op if already org
 func (p *Provider) EnableOrganization(actorID string) error {
 	if p.IsOrganization() {
 		return nil
@@ -57,6 +56,9 @@ func (p *Provider) EnableOrganization(actorID string) error {
 		&models.Organization{},
 		&models.Invite{},
 		&models.AuditEvent{},
+		&models.OrgVaultMembership{},
+		&models.OrgCategory{},
+		&models.OrgVault{},
 	); err != nil {
 		return err
 	}
@@ -85,8 +87,9 @@ func (p *Provider) EnableOrganization(actorID string) error {
 	return nil
 }
 
-// RevertToPersonal drops the org-only tables and persists personal mode. It does
-// not delete users; the caller removes accounts first. No-op if already personal.
+// RevertToPersonal drops the org-only tables and persists personal mode
+// It does not delete users; the caller removes accounts first
+// No-op if already personal
 func (p *Provider) RevertToPersonal() error {
 	if !p.IsOrganization() {
 		return nil
@@ -96,7 +99,7 @@ func (p *Provider) RevertToPersonal() error {
 		return err
 	}
 
-	for _, table := range []string{"audit_event", "invite", "organization"} {
+	for _, table := range []string{"org_vault", "org_category", "org_vault_membership", "audit_event", "invite", "organization"} {
 		if err := p.db.Exec("DROP TABLE IF EXISTS " + table).Error; err != nil {
 			return err
 		}

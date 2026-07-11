@@ -6,13 +6,14 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"librelock-server/crypto"
 	"librelock-server/middleware"
 	"librelock-server/models"
 )
 
-// defaultInviteDays is used when a request does not specify an expiry.
+// defaultInviteDays is used when a request does not specify an expiry
 const defaultInviteDays = 1
 
 func inviteStatus(i *models.Invite) string {
@@ -43,8 +44,8 @@ type createInviteRequest struct {
 	ExpiresInDays int    `json:"expires_in_days" binding:"omitempty,min=1,max=90"`
 }
 
-// CreateInvite mints a single-use invite token (admin only). The raw token is
-// returned once — only its hash is stored.
+// CreateInvite mints a single-use invite token (admin only)
+// The raw token is returned once; only its hash is stored
 func (h *OrganizationHandler) CreateInvite(c *gin.Context) {
 	var req createInviteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -76,7 +77,7 @@ func (h *OrganizationHandler) CreateInvite(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"invite": out})
 }
 
-// ListInvites returns invites newest first (admin only).
+// ListInvites returns invites newest first (admin only)
 func (h *OrganizationHandler) ListInvites(c *gin.Context) {
 	var invites []models.Invite
 	if err := h.db.Order("created_at desc").Find(&invites).Error; err != nil {
@@ -90,7 +91,30 @@ func (h *OrganizationHandler) ListInvites(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"invites": out})
 }
 
-// RevokeInvite deletes an invite (admin only).
+// PruneInvites bulk-deletes invites (admin only)
+// The `scope` query selects which: "all" wipes every invite; anything else ("spent", the default) removes only used or expired ones, leaving still-usable pending invites in place
+func (h *OrganizationHandler) PruneInvites(c *gin.Context) {
+	scope := c.Query("scope")
+
+	// AllowGlobalUpdate lets the "all" scope delete without a WHERE clause; GORM blocks unscoped batch deletes by default as a safety guard
+	tx := h.db.Session(&gorm.Session{AllowGlobalUpdate: true})
+	if scope != "all" {
+		scope = "spent"
+		tx = tx.Where("used_at IS NOT NULL OR expires_at < ?", time.Now())
+	}
+
+	result := tx.Delete(&models.Invite{})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to prune invites"})
+		return
+	}
+
+	actor := c.MustGet(middleware.UserKey).(*models.User)
+	recordAudit(h.db, AuditInviteRevoked, actor, "", "", fmt.Sprintf("pruned %d %s invites", result.RowsAffected, scope))
+	c.JSON(http.StatusOK, gin.H{"deleted": result.RowsAffected})
+}
+
+// RevokeInvite deletes an invite (admin only)
 func (h *OrganizationHandler) RevokeInvite(c *gin.Context) {
 	var inv models.Invite
 	if err := h.db.First(&inv, "id = ?", c.Param("id")).Error; err != nil {

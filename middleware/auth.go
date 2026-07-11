@@ -18,7 +18,7 @@ const (
 	TokenKey     = "token"
 )
 
-func Auth(db *gorm.DB) gin.HandlerFunc {
+func Auth(db *gorm.DB, ttl int, env string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := extractToken(c)
 		if token == "" {
@@ -33,7 +33,14 @@ func Auth(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		db.Model(&session).UpdateColumn("last_used_at", time.Now())
+		now := time.Now()
+		updates := map[string]any{"last_used_at": now}
+		// Sliding expiration: an active user should never be logged out mid-session Once past the halfway point of the window, push the expiry forward and refresh the cookie's max-age to match
+		if ttl > 0 && time.Until(session.ExpiresAt) < time.Duration(ttl)*time.Second/2 {
+			updates["expires_at"] = now.Add(time.Duration(ttl) * time.Second)
+			setTokenCookie(c, token, ttl, env)
+		}
+		db.Model(&session).Updates(updates)
 
 		var user models.User
 		if err := db.First(&user, "id = ?", session.UserID).Error; err != nil {
@@ -41,7 +48,7 @@ func Auth(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		// A suspended user's live sessions must stop working immediately.
+		// A suspended user's live sessions must stop working immediately
 		if user.Status == models.StatusSuspended {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Account suspended"})
 			return
@@ -52,6 +59,12 @@ func Auth(db *gorm.DB) gin.HandlerFunc {
 		c.Set(TokenKey, token)
 		c.Next()
 	}
+}
+
+// setTokenCookie mirrors the handler's cookie settings so a renewed session's cookie stays consistent with the one issued at login
+func setTokenCookie(c *gin.Context, token string, ttl int, env string) {
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie("token", token, ttl, "/", "", env == "production", true)
 }
 
 func extractToken(c *gin.Context) string {
