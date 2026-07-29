@@ -15,6 +15,7 @@ import (
 	"librelock-server/db"
 	"librelock-server/handlers"
 	"librelock-server/middleware"
+	"librelock-server/version"
 )
 
 func main() {
@@ -27,7 +28,7 @@ func main() {
 		db.MigrateOrg(database)
 		db.EnsureOrgOwner(database)
 	}
-	log.Printf("mode=%s", mode.Current())
+	log.Printf("librelock %s mode=%s", version.Version, mode.Current())
 
 	// Use JSON tag names in validation error messages
 	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
@@ -66,6 +67,8 @@ func main() {
 	r.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "API is running"})
 	})
+
+	r.GET("/version", handlers.Version)
 
 	// Public branding
 	// The frontend swaps logo/name on load

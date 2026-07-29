@@ -1,6 +1,10 @@
 services:
   api:
-    build: .
+    build:
+      context: .
+      args:
+        # docker compose build --build-arg VERSION=$(git describe --tags)
+        VERSION: ${VERSION:-dev}
     ports:
       - "8000:8000"
     env_file: .env

@@ -26,4 +26,4 @@ The API is now running at [localhost:8000](http://localhost:8000). The SQLite da
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for project structure, code style, and security guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, code style, and security guidelines.
