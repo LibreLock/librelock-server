@@ -15,7 +15,7 @@ go run .
 
 The SQLite file is created automatically at `DB_PATH`, and the server applies schema changes on startup via GORM AutoMigrate. No separate migration step needed in development.
 
-Organization tables (roles, invites, audit log, shared vault) are migrated lazily, only once an instance switches to organization mode — so organization-specific code must tolerate those tables not existing at all in personal mode.
+Organization tables (roles, invites, audit log, shared vault) are migrated lazily, only once an instance switches to organization mode - so organization-specific code must tolerate those tables not existing at all in personal mode.
 
 ## Versioning
 
@@ -25,7 +25,7 @@ Organization tables (roles, invites, audit log, shared vault) are migrated lazil
 docker compose build --build-arg VERSION="$(git describe --tags)"
 ```
 
-Tag the server and the web app with the same version — the frontend shows both side by side (Settings → About) so a half-finished upgrade is visible.
+Tag the server and the web app with the same version - the frontend shows both side by side (Settings → About) so a half-finished upgrade is visible.
 
 ## Code style
 
@@ -48,7 +48,7 @@ Always hash with Argon2id before writing to the DB
 - **Token comparison must use the hash.**
 <br>
 Never store or compare raw tokens
-- **Argon2id hash format** in `crypto/password.go` uses the standard PHC string format (`$argon2id$v=19$m=...`). Changing the params is fine — `VerifyPassword` reads `m`/`t`/`p` from the stored hash, so existing hashes keep working
+- **Argon2id hash format** in `crypto/password.go` uses the standard PHC string format (`$argon2id$v=19$m=...`). Changing the params is fine - `VerifyPassword` reads `m`/`t`/`p` from the stored hash, so existing hashes keep working
 
 ## Submitting a pull request
 

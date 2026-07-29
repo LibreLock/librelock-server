@@ -76,7 +76,7 @@ func EnsureOrgOwner(db *gorm.DB) {
 	}
 	var user models.User
 	if err := db.Order("created_at asc").First(&user).Error; err != nil {
-		return // no users yet — first to register becomes owner
+		return // no users yet - first to register becomes owner
 	}
 	if err := db.Model(&user).UpdateColumn("role", models.RoleOwner).Error; err != nil {
 		log.Printf("bootstrap: failed to promote owner: %v", err)
