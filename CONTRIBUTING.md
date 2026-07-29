@@ -8,7 +8,6 @@ Requirements: Go 1.25+
 git clone <repo-url>
 cd librelock-server
 
-createdb librelock # or use docker compose up -d db
 cp .env.example .env # edit as needed
 
 go run .
