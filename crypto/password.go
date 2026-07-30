@@ -24,7 +24,9 @@ func HashPassword(password string) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
+	release := acquireHashSlot()
 	hash := argon2.IDKey([]byte(password), salt, argon2Iterations, argon2Memory, argon2Parallelism, argon2KeyLen)
+	release()
 	return fmt.Sprintf("$argon2id$v=19$m=%d,t=%d,p=%d$%s$%s",
 		argon2Memory, argon2Iterations, argon2Parallelism,
 		base64.RawStdEncoding.EncodeToString(salt),
@@ -55,6 +57,9 @@ func VerifyPassword(password, encodedHash string) (bool, error) {
 		return false, fmt.Errorf("decode hash: %w", err)
 	}
 
+	release := acquireHashSlot()
 	computed := argon2.IDKey([]byte(password), salt, t, m, p, uint32(len(decodedHash)))
+	release()
+
 	return subtle.ConstantTimeCompare(computed, decodedHash) == 1, nil
 }

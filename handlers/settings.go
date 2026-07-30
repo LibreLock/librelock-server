@@ -116,10 +116,11 @@ type updatePasswordRequest struct {
 	CurrentAuthCredential string `json:"current_auth_credential" binding:"required"`
 	NewAuthCredential     string `json:"new_auth_credential"     binding:"required,min=32,max=512"`
 	NewProtectedKey       string `json:"new_protected_key"       binding:"required,min=32,max=1024"`
-	NewKDFSalt            string `json:"new_kdf_salt"            binding:"required,min=16,max=512"`
-	NewKDFIter            int    `json:"new_kdf_iter"            binding:"required,min=1,max=10000"`
-	NewKDFMemory          int    `json:"new_kdf_memory"          binding:"required,min=8192,max=1048576"`
-	NewKDFParallelism     int    `json:"new_kdf_parallelism"     binding:"required,min=1,max=16"`
+	// Same floor as registration; see the KDF minimums in auth.go
+	NewKDFSalt        string `json:"new_kdf_salt"            binding:"required,min=64,max=512"`
+	NewKDFIter        int    `json:"new_kdf_iter"            binding:"required,min=4,max=10000"`
+	NewKDFMemory      int    `json:"new_kdf_memory"          binding:"required,min=65536,max=1048576"`
+	NewKDFParallelism int    `json:"new_kdf_parallelism"     binding:"required,min=1,max=16"`
 	// Private key re-wrapped under the new password key
 	// Sent when the account has a sharing keypair; the public key and memberships are unaffected
 	NewEncryptedPrivateKey string `json:"new_encrypted_private_key" binding:"omitempty,max=8192"`

@@ -16,14 +16,20 @@ import (
 )
 
 type AuthHandler struct {
-	db   *gorm.DB
-	ttl  int
-	env  string
-	mode *appmode.Provider
+	db     *gorm.DB
+	ttl    int
+	env    string
+	mode   *appmode.Provider
+	secret string // per-instance, keys the decoy KDF salts
 }
 
-func NewAuthHandler(db *gorm.DB, ttl int, env string, mode *appmode.Provider) *AuthHandler {
-	return &AuthHandler{db: db, ttl: ttl, env: env, mode: mode}
+func NewAuthHandler(db *gorm.DB, ttl int, env string, mode *appmode.Provider, secret string) *AuthHandler {
+	return &AuthHandler{db: db, ttl: ttl, env: env, mode: mode, secret: secret}
+}
+
+// normalizeUsername must be applied identically everywhere a username is looked up, or the decoy KDF params for a miss won't line up with the account a later login resolves
+func normalizeUsername(name string) string {
+	return strings.TrimSpace(name)
 }
 
 // registrationPolicy reads the admin-set policy from the organization row, defaulting to invite-only if unset
@@ -40,16 +46,17 @@ func (h *AuthHandler) registrationPolicy() string {
 }
 
 func (h *AuthHandler) KDF(c *gin.Context) {
-	username := strings.TrimSpace(c.Query("username"))
+	username := normalizeUsername(c.Query("username"))
 	var user models.User
 	if err := h.db.Where("username = ?", username).First(&user).Error; err != nil {
-		// Don't reveal the user doesn't exist; return plausible defaults
+		// Don't reveal the user doesn't exist: answer with the parameters this username would have been given at registration
+		// The salt is derived from the instance secret, so it matches a real one in length and shape and stays the same on every request
 		c.JSON(http.StatusOK, gin.H{
 			"kdf_algo":        "argon2id",
-			"kdf_salt":        crypto.IssueToken()[:32],
-			"kdf_iter":        4,
-			"kdf_memory":      65536,
-			"kdf_parallelism": 4,
+			"kdf_salt":        crypto.DecoyKDFSalt(h.secret, username),
+			"kdf_iter":        minKDFIter,
+			"kdf_memory":      minKDFMemory,
+			"kdf_parallelism": defaultKDFParallelism,
 		})
 		return
 	}
@@ -62,13 +69,22 @@ func (h *AuthHandler) KDF(c *gin.Context) {
 	})
 }
 
+// Lower bounds for the client-chosen KDF parameters, mirroring what the web client picks for itself (KDF_ITER / KDF_MEMORY in src/constants.ts, plus its 32-byte random salt)
+// The client enforces the same floor on the parameters the server hands back, so neither side can talk the other into a weak derivation
+// The binding tags below repeat these values because struct tags can't reference consts, and the salt floor lives only there (min=64)
+const (
+	minKDFIter            = 4
+	minKDFMemory          = 65536 // 64 MiB
+	defaultKDFParallelism = 4
+)
+
 type registerRequest struct {
 	Username       string              `json:"username"        binding:"required,max=500"`
 	AuthCredential string              `json:"auth_credential" binding:"required,min=32,max=512"`
 	ProtectedKey   string              `json:"protected_key"   binding:"required,min=32,max=1024"`
-	KDFSalt        string              `json:"kdf_salt"        binding:"required,min=16,max=512"`
-	KDFIter        int                 `json:"kdf_iter"        binding:"required,min=1,max=10000"`
-	KDFMemory      int                 `json:"kdf_memory"      binding:"required,min=8192,max=1048576"`
+	KDFSalt        string              `json:"kdf_salt"        binding:"required,min=64,max=512"`
+	KDFIter        int                 `json:"kdf_iter"        binding:"required,min=4,max=10000"`
+	KDFMemory      int                 `json:"kdf_memory"      binding:"required,min=65536,max=1048576"`
 	KDFParallelism int                 `json:"kdf_parallelism" binding:"required,min=1,max=16"`
 	Categories     []categoryNameInput `json:"categories"`
 	InviteToken    string              `json:"invite_token"`
@@ -90,15 +106,6 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	var count int64
-	h.db.Model(&models.User{}).Where("username = ?", strings.TrimSpace(req.Username)).Count(&count)
-	if count > 0 {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": map[string][]string{
-			"username": {"Username taken"},
-		}})
-		return
-	}
-
 	if len(req.Categories) > 20 {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": map[string][]string{
 			"categories": {"The categories may not have more than 20 items."},
@@ -106,14 +113,9 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	authHash, err := crypto.HashPassword(req.AuthCredential)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
-		return
-	}
-
 	// Org mode: the first account becomes owner; afterwards invite mode requires a valid token
 	// Personal mode leaves the role at its (unused) default
+	// This runs before the username check and before hashing so an invite-only instance gives nothing away to a caller without a token: no "username taken" oracle, and no 64 MiB of argon2 spent on a request that was never going to create an account
 	role := models.RoleMember
 	var consumedInvite *models.Invite
 	if h.mode.IsOrganization() {
@@ -133,6 +135,23 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		}
 	}
 
+	// Registration is the one place the existence of an account is unavoidably observable: a taken name has to be reported for the form to be usable
+	// Open-registration instances are therefore enumerable by anyone; /auth/kdf and login are not
+	var count int64
+	h.db.Model(&models.User{}).Where("username = ?", normalizeUsername(req.Username)).Count(&count)
+	if count > 0 {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": map[string][]string{
+			"username": {"Username taken"},
+		}})
+		return
+	}
+
+	authHash, err := crypto.HashPassword(req.AuthCredential)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		return
+	}
+
 	// Client sends the OS/browser-resolved theme at sign-up
 	theme := req.Theme
 	if theme == "" {
@@ -140,7 +159,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 
 	user := models.User{
-		Username:            strings.TrimSpace(req.Username),
+		Username:            normalizeUsername(req.Username),
 		Role:                role,
 		Theme:               theme,
 		AuthHash:            authHash,
@@ -203,7 +222,9 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	var user models.User
-	if err := h.db.Where("username = ?", strings.TrimSpace(req.Username)).First(&user).Error; err != nil {
+	if err := h.db.Where("username = ?", normalizeUsername(req.Username)).First(&user).Error; err != nil {
+		// Spend the same argon2 work a real account would, so the response time doesn't say whether the username exists
+		crypto.DummyVerify(req.AuthCredential)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}

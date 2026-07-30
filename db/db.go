@@ -1,6 +1,7 @@
 package db
 
 import (
+	"errors"
 	"log"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"gorm.io/gorm/logger"
 	"gorm.io/gorm/schema"
 
+	"librelock-server/crypto"
 	"librelock-server/models"
 )
 
@@ -65,6 +67,39 @@ func MigrateOrg(db *gorm.DB) {
 	// Drop columns removed from models (AutoMigrate never drops)
 	// Done with raw SQL because GORM's Migrator resolves the column against struct fields, which no longer exist once the field is deleted
 	dropColumn(db, "organization", "primary_color")
+}
+
+// EnsureServerSecret returns this instance's random secret, generating it on first use
+// It keys the decoy KDF salts served for unknown usernames, so it must survive restarts - a secret regenerated per boot would make the same unknown username answer differently over time
+// Call this after the mode has been resolved: on a fresh database it seeds the app_state row, and writing that row too early would hide a legacy organization database from appmode's detection
+func EnsureServerSecret(db *gorm.DB, mode string) string {
+	var st models.AppState
+	err := db.First(&st, "id = ?", models.AppStateSingletonID).Error
+	if err == nil && st.ServerSecret != "" {
+		return st.ServerSecret
+	}
+
+	secret := crypto.IssueToken()
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		if err := db.Create(&models.AppState{
+			ID:           models.AppStateSingletonID,
+			Mode:         mode,
+			ServerSecret: secret,
+		}).Error; err != nil {
+			log.Fatalf("db server secret: %v", err)
+		}
+		return secret
+	}
+	if err != nil {
+		log.Fatalf("db server secret: %v", err)
+	}
+
+	if err := db.Model(&models.AppState{}).
+		Where("id = ?", models.AppStateSingletonID).
+		UpdateColumn("server_secret", secret).Error; err != nil {
+		log.Fatalf("db server secret: %v", err)
+	}
+	return secret
 }
 
 // EnsureOrgOwner promotes the oldest user to owner if the instance has none

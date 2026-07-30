@@ -24,6 +24,8 @@ func main() {
 
 	// Mode is persisted in the database and read live via the provider
 	mode := appmode.New(database)
+	// After appmode.New: seeding app_state any earlier would mask a legacy organization database
+	serverSecret := db.EnsureServerSecret(database, mode.Current())
 	if mode.IsOrganization() {
 		db.MigrateOrg(database)
 		db.EnsureOrgOwner(database)
@@ -46,14 +48,16 @@ func main() {
 	}
 
 	r := gin.New()
-	r.SetTrustedProxies(nil)
+	if err := r.SetTrustedProxies(cfg.TrustedProxies); err != nil {
+		log.Fatalf("trusted proxies: %v", err)
+	}
 	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
 	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.MaxBodySize(1 << 20)) // 1 MiB
 	r.Use(middleware.CORS(cfg.AllowedOrigin))
 
-	authH := handlers.NewAuthHandler(database, cfg.TokenTTL, cfg.AppEnv, mode)
+	authH := handlers.NewAuthHandler(database, cfg.TokenTTL, cfg.AppEnv, mode, serverSecret)
 	vaultH := handlers.NewVaultHandler(database)
 	orgVaultH := handlers.NewOrgVaultHandler(database)
 	orgCategoryH := handlers.NewOrgCategoryHandler(database)
@@ -75,11 +79,16 @@ func main() {
 	r.GET("/organization", orgH.Show)
 	r.GET("/organization/logo", orgH.Logo)
 
+	// Login and register each cost a 64 MiB argon2 hash, and /auth/kdf is the endpoint an enumeration sweep would hammer
+	// A real sign-in spends two requests (kdf + login), so 20 with one back every 3s leaves normal use untouched
+	// Only those three carry the limiter: /auth/me and /auth/logout are authenticated and hash nothing, and /auth/me runs on every page load
+	// Sharing a bucket with them would 429 real users behind one egress IP without making the expensive endpoints any safer
+	authLimit := middleware.RateLimit(20, 1.0/3.0)
 	auth := r.Group("/auth")
 	{
-		auth.GET("/kdf", authH.KDF)
-		auth.POST("/register", authH.Register)
-		auth.POST("/login", authH.Login)
+		auth.GET("/kdf", authLimit, authH.KDF)
+		auth.POST("/register", authLimit, authH.Register)
+		auth.POST("/login", authLimit, authH.Login)
 		auth.POST("/logout", authMW, authH.Logout)
 		auth.GET("/me", authMW, authH.Me)
 	}
