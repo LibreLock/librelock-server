@@ -114,13 +114,14 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 
 	// Org mode: the first account becomes owner; afterwards invite mode requires a valid token
-	// Personal mode leaves the role at its (unused) default
-	// Running before the username check and before hashing means an invite-only instance gives a tokenless caller nothing: no "username taken" oracle and no 64 MiB of argon2 spent
+	// Personal mode leaves the role at its (unused) default, but still gates sign-up: after the
+	// first account exists the instance is closed until someone opts in from Settings
+	// Running before the username check and before hashing means a closed instance gives an unauthorised caller nothing: no "username taken" oracle and no 64 MiB of argon2 spent
 	role := models.RoleMember
 	var consumedInvite *models.Invite
+	var userCount int64
+	h.db.Model(&models.User{}).Count(&userCount)
 	if h.mode.IsOrganization() {
-		var userCount int64
-		h.db.Model(&models.User{}).Count(&userCount)
 		if userCount == 0 {
 			role = models.RoleOwner // founder
 		} else if h.registrationPolicy() == models.RegistrationInvite {
@@ -133,6 +134,11 @@ func (h *AuthHandler) Register(c *gin.Context) {
 			}
 			consumedInvite = inv
 		}
+	} else if userCount > 0 && !h.mode.RegistrationOpen() {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "This instance is not accepting new accounts.",
+		})
+		return
 	}
 
 	// Registration unavoidably reveals whether a name is taken, so open-registration instances are enumerable; /auth/kdf and login are not

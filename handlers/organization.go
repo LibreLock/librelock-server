@@ -76,7 +76,8 @@ func (h *OrganizationHandler) orgPayload(o *models.Organization) map[string]any 
 }
 
 // personalPayload is the branding response for a personal instance: plain LibreLock, no org row touched (the organization table may not even exist)
-func personalPayload() map[string]any {
+// registration is "open" only while the instance has no accounts (so the first user can sign up) or after that user opts in
+func (h *OrganizationHandler) personalPayload() map[string]any {
 	return map[string]any{
 		"name":              "LibreLock",
 		"support_email":     "",
@@ -85,9 +86,21 @@ func personalPayload() map[string]any {
 		"has_logo":          false,
 		"logo_updated_at":   time.Time{},
 		"mode":              config.ModePersonal,
-		"registration":      models.RegistrationOpen,
+		"registration":      h.personalRegistration(),
 		"auto_grant_shared": false,
 	}
+}
+
+func (h *OrganizationHandler) personalRegistration() string {
+	if h.mode.RegistrationOpen() {
+		return models.RegistrationOpen
+	}
+	var users int64
+	h.db.Model(&models.User{}).Count(&users)
+	if users == 0 {
+		return models.RegistrationOpen // nobody has claimed the instance yet
+	}
+	return models.RegistrationClosed
 }
 
 // registrationOrDefault normalises a possibly-empty stored value
@@ -101,7 +114,7 @@ func registrationOrDefault(v string) string {
 // Show is public; the frontend calls it on load to swap branding
 func (h *OrganizationHandler) Show(c *gin.Context) {
 	if !h.mode.IsOrganization() {
-		c.JSON(http.StatusOK, gin.H{"organization": personalPayload()})
+		c.JSON(http.StatusOK, gin.H{"organization": h.personalPayload()})
 		return
 	}
 	org, err := h.getOrCreate()

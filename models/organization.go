@@ -8,9 +8,11 @@ import (
 const OrgSingletonID = "org"
 
 // Registration policies, admin-toggled at runtime on the org row
+// RegistrationClosed is personal-mode only: no invites exist there, so sign-up is simply on or off
 const (
 	RegistrationOpen   = "open"
 	RegistrationInvite = "invite"
+	RegistrationClosed = "closed"
 )
 
 type Organization struct {

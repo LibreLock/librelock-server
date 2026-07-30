@@ -208,7 +208,8 @@ func (h *SettingsHandler) DeleteAccount(c *gin.Context) {
 
 type switchModeRequest struct {
 	Mode string `json:"mode" binding:"required,oneof=personal organization"`
-	// Re-authenticates the owner for the destructive revert to personal
+	// Re-authenticates the caller: required in both directions, since enabling organization mode
+	// makes the caller owner over every other account on the instance
 	AuthCredential string `json:"auth_credential"`
 }
 
@@ -232,12 +233,108 @@ func (h *SettingsHandler) SwitchMode(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"mode": h.mode.Current()})
 		return
 	}
+	if !h.requireFirstAccount(c, user) {
+		return
+	}
+	if !h.confirmPassword(c, user, req.AuthCredential) {
+		return
+	}
 	if err := h.mode.EnableOrganization(user.ID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to switch to organization mode"})
 		return
 	}
 	recordAudit(h.db, AuditModeChanged, user, user.ID, user.Username, "switched to organization")
 	c.JSON(http.StatusOK, gin.H{"mode": h.mode.Current()})
+}
+
+// requireFirstAccount limits the instance-wide personal-mode controls to the oldest account,
+// writing the error response itself
+// Personal mode has no roles, so without this any account could seize the instance: enabling
+// organization mode makes the caller owner, and an owner can then revert and delete everyone else
+func (h *SettingsHandler) requireFirstAccount(c *gin.Context, user *models.User) bool {
+	if isFirstAccount(h.db, user.ID) {
+		return true
+	}
+	c.JSON(http.StatusForbidden, gin.H{
+		"error": "Only the first account created on this instance can change this.",
+	})
+	return false
+}
+
+// confirmPassword re-authenticates the caller for a mode switch, writing the error response itself
+func (h *SettingsHandler) confirmPassword(c *gin.Context, user *models.User, credential string) bool {
+	if credential == "" {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": map[string][]string{
+			"auth_credential": {"Password confirmation is required."},
+		}})
+		return false
+	}
+	ok, err := crypto.VerifyPassword(credential, user.AuthHash)
+	if err != nil || !ok {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Invalid credentials"})
+		return false
+	}
+	return true
+}
+
+// ShowInstance describes the instance-wide settings: where they stand and who is allowed to change them
+// Naming the first account is the point - a member who cannot change these needs to know who to ask
+func (h *SettingsHandler) ShowInstance(c *gin.Context) {
+	user := c.MustGet(middleware.UserKey).(*models.User)
+
+	first, err := firstAccount(h.db)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load instance"})
+		return
+	}
+
+	registration := models.RegistrationClosed
+	if h.mode.RegistrationOpen() {
+		registration = models.RegistrationOpen
+	}
+
+	c.JSON(http.StatusOK, gin.H{"instance": gin.H{
+		"registration":           registration,
+		"is_first_account":       first.ID == user.ID,
+		"first_account_username": first.Username,
+	}})
+}
+
+type updatePersonalRegistrationRequest struct {
+	Open *bool `json:"open" binding:"required"`
+}
+
+// UpdateRegistration opens or closes sign-up on a personal instance
+// Organization instances use the admin-only /organization/registration endpoint instead
+func (h *SettingsHandler) UpdateRegistration(c *gin.Context) {
+	if h.mode.IsOrganization() {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "Organization instances manage registration from the Organization area.",
+		})
+		return
+	}
+
+	user := c.MustGet(middleware.UserKey).(*models.User)
+	if !h.requireFirstAccount(c, user) {
+		return
+	}
+
+	var req updatePersonalRegistrationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": validationErrors(err)})
+		return
+	}
+
+	if err := h.mode.SetRegistrationOpen(*req.Open); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update registration"})
+		return
+	}
+
+	policy := models.RegistrationClosed
+	if *req.Open {
+		policy = models.RegistrationOpen
+	}
+	c.JSON(http.StatusOK, gin.H{"registration": policy})
 }
 
 // revertToPersonal is the destructive organization → personal downgrade: owner-only, password-confirmed, deletes every other account and their data
@@ -252,15 +349,7 @@ func (h *SettingsHandler) revertToPersonal(c *gin.Context, user *models.User, re
 		return
 	}
 
-	if req.AuthCredential == "" {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": map[string][]string{
-			"auth_credential": {"Password confirmation is required."},
-		}})
-		return
-	}
-	ok, err := crypto.VerifyPassword(req.AuthCredential, user.AuthHash)
-	if err != nil || !ok {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Invalid credentials"})
+	if !h.confirmPassword(c, user, req.AuthCredential) {
 		return
 	}
 

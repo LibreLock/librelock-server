@@ -114,6 +114,9 @@ func main() {
 		s.PUT("/keypair", settingsH.UploadKeypair)
 		s.DELETE("/account", settingsH.DeleteAccount)
 		s.PUT("/mode", settingsH.SwitchMode)
+		// Instance-wide settings, personal mode only (organization mode covers these in its own area)
+		s.GET("/instance", settingsH.ShowInstance)
+		s.PUT("/registration", settingsH.UpdateRegistration)
 
 		sess := protected.Group("/sessions")
 		sess.GET("", sessionH.Index)

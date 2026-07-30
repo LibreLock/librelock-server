@@ -5,9 +5,24 @@ import (
 	"strings"
 
 	"github.com/go-playground/validator/v10"
+	"gorm.io/gorm"
 
 	"librelock-server/models"
 )
+
+// firstAccount returns the oldest account on the instance
+// Personal mode has no roles, so it stands in for the operator: it alone may open sign-up or turn the instance into an organization
+// Ties break on id so the answer never flips between calls
+func firstAccount(db *gorm.DB) (models.User, error) {
+	var first models.User
+	err := db.Order("created_at asc, id asc").First(&first).Error
+	return first, err
+}
+
+func isFirstAccount(db *gorm.DB, userID string) bool {
+	first, err := firstAccount(db)
+	return err == nil && first.ID == userID
+}
 
 func publicUser(u *models.User) map[string]any {
 	return map[string]any{
