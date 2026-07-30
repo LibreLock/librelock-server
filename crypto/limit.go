@@ -7,12 +7,12 @@ import (
 	"sync"
 )
 
-// Every argon2 call allocates 64 MiB, and the endpoints that hash (login, register) are unauthenticated: without a cap, N concurrent requests hold N * 64 MiB and a few hundred of them exhaust the machine
-// hashSlots bounds how many hashes run at once; the rest wait for a slot instead of allocating
-// Requests are also rate limited per client, which keeps that queue short
+// Every argon2 call allocates 64 MiB and the endpoints that hash are unauthenticated, so without a cap a few hundred concurrent requests exhaust the machine
+// hashSlots bounds how many run at once; the rest wait for a slot instead of allocating
 var hashSlots = make(chan struct{}, maxConcurrentHashes())
 
-// maxConcurrentHashes defaults to one hash per CPU (argon2 is CPU- and memory-bound, so more in flight than that buys no throughput) and can be lowered on small hosts via ARGON2_MAX_CONCURRENCY
+// One hash per CPU by default: argon2 is CPU- and memory-bound, so more in flight buys no throughput
+// Lower it on small hosts with ARGON2_MAX_CONCURRENCY
 func maxConcurrentHashes() int {
 	n := runtime.NumCPU()
 	if v := os.Getenv("ARGON2_MAX_CONCURRENCY"); v != "" {
@@ -38,7 +38,7 @@ var (
 )
 
 // DummyVerify burns the same work a real password check would
-// Login for an unknown username would otherwise answer immediately while a real one spends ~100 ms in argon2, and that difference alone tells an attacker which usernames are registered
+// Without it login answers immediately for an unknown username and spends ~100 ms for a real one, which alone says who is registered
 func DummyVerify(candidate string) {
 	decoyOnce.Do(func() {
 		if h, err := HashPassword(IssueToken()); err == nil {

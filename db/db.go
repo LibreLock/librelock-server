@@ -70,8 +70,8 @@ func MigrateOrg(db *gorm.DB) {
 }
 
 // EnsureServerSecret returns this instance's random secret, generating it on first use
-// It keys the decoy KDF salts served for unknown usernames, so it must survive restarts - a secret regenerated per boot would make the same unknown username answer differently over time
-// Call this after the mode has been resolved: on a fresh database it seeds the app_state row, and writing that row too early would hide a legacy organization database from appmode's detection
+// It keys the decoy KDF salts, so it must survive restarts: regenerating per boot would make the same unknown username answer differently over time
+// Call it after the mode is resolved - seeding app_state earlier would hide a legacy organization database from appmode's detection
 func EnsureServerSecret(db *gorm.DB, mode string) string {
 	var st models.AppState
 	err := db.First(&st, "id = ?", models.AppStateSingletonID).Error

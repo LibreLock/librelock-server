@@ -50,7 +50,7 @@ func (h *AuthHandler) KDF(c *gin.Context) {
 	var user models.User
 	if err := h.db.Where("username = ?", username).First(&user).Error; err != nil {
 		// Don't reveal the user doesn't exist: answer with the parameters this username would have been given at registration
-		// The salt is derived from the instance secret, so it matches a real one in length and shape and stays the same on every request
+		// The decoy salt matches a real one in shape and stays the same on every request
 		c.JSON(http.StatusOK, gin.H{
 			"kdf_algo":        "argon2id",
 			"kdf_salt":        crypto.DecoyKDFSalt(h.secret, username),
@@ -69,9 +69,9 @@ func (h *AuthHandler) KDF(c *gin.Context) {
 	})
 }
 
-// Lower bounds for the client-chosen KDF parameters, mirroring what the web client picks for itself (KDF_ITER / KDF_MEMORY in src/constants.ts, plus its 32-byte random salt)
-// The client enforces the same floor on the parameters the server hands back, so neither side can talk the other into a weak derivation
-// The binding tags below repeat these values because struct tags can't reference consts, and the salt floor lives only there (min=64)
+// Lower bounds for the client-chosen KDF parameters, mirroring KDF_ITER / KDF_MEMORY in src/constants.ts
+// The client enforces the same floor on what the server returns, so neither side can talk the other into a weak derivation
+// Struct tags can't reference consts, so the binding tags repeat these and carry the salt floor (min=64) alone
 const (
 	minKDFIter            = 4
 	minKDFMemory          = 65536 // 64 MiB
@@ -115,7 +115,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	// Org mode: the first account becomes owner; afterwards invite mode requires a valid token
 	// Personal mode leaves the role at its (unused) default
-	// This runs before the username check and before hashing so an invite-only instance gives nothing away to a caller without a token: no "username taken" oracle, and no 64 MiB of argon2 spent on a request that was never going to create an account
+	// Running before the username check and before hashing means an invite-only instance gives a tokenless caller nothing: no "username taken" oracle and no 64 MiB of argon2 spent
 	role := models.RoleMember
 	var consumedInvite *models.Invite
 	if h.mode.IsOrganization() {
@@ -135,8 +135,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		}
 	}
 
-	// Registration is the one place the existence of an account is unavoidably observable: a taken name has to be reported for the form to be usable
-	// Open-registration instances are therefore enumerable by anyone; /auth/kdf and login are not
+	// Registration unavoidably reveals whether a name is taken, so open-registration instances are enumerable; /auth/kdf and login are not
 	var count int64
 	h.db.Model(&models.User{}).Where("username = ?", normalizeUsername(req.Username)).Count(&count)
 	if count > 0 {

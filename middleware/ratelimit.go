@@ -15,9 +15,7 @@ type bucket struct {
 }
 
 // RateLimit is a per-client token bucket: burst requests may arrive at once, then one more every 1/perSecond
-// It fronts the auth endpoints that hash, where each request can cost a 64 MiB argon2 hash
-// Clients are keyed on gin's ClientIP, which honours X-Forwarded-For only for trusted proxies (TRUSTED_PROXIES)
-// Behind an untrusted-by-default proxy every request looks like the proxy, so the whole deployment shares one bucket - set TRUSTED_PROXIES when running behind one
+// Clients are keyed on gin's ClientIP, which honours X-Forwarded-For only for trusted proxies, so behind an untrusted one the whole deployment shares a bucket - set TRUSTED_PROXIES
 func RateLimit(burst int, perSecond float64) gin.HandlerFunc {
 	var (
 		mu        sync.Mutex

@@ -79,10 +79,8 @@ func main() {
 	r.GET("/organization", orgH.Show)
 	r.GET("/organization/logo", orgH.Logo)
 
-	// Login and register each cost a 64 MiB argon2 hash, and /auth/kdf is the endpoint an enumeration sweep would hammer
-	// A real sign-in spends two requests (kdf + login), so 20 with one back every 3s leaves normal use untouched
-	// Only those three carry the limiter: /auth/me and /auth/logout are authenticated and hash nothing, and /auth/me runs on every page load
-	// Sharing a bucket with them would 429 real users behind one egress IP without making the expensive endpoints any safer
+	// kdf invites an enumeration sweep, login and register each cost a 64 MiB argon2 hash, and a real sign-in spends two requests
+	// /auth/me and /auth/logout stay out: they are authenticated, hash nothing, and /auth/me runs on every page load, so sharing a bucket would only 429 real users behind one egress IP
 	authLimit := middleware.RateLimit(20, 1.0/3.0)
 	auth := r.Group("/auth")
 	{
