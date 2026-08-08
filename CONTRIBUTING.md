@@ -19,13 +19,19 @@ Organization tables (roles, invites, audit log, shared vault) are migrated lazil
 
 ## Versioning
 
-`GET /version` reports the running version. It lives in `version/version.go` and defaults to `dev`; release builds stamp it at link time:
+`GET /version` reports the running version. Nothing in this repository records a number: `version/version.go` says `dev`, and CI stamps the real value at link time from the git tag. To stamp a local build the same way:
 
 ```bash
 docker compose build --build-arg VERSION="$(git describe --tags)"
 ```
 
-Tag the server and the web app with the same version - the frontend shows both side by side (Settings → About) so a half-finished upgrade is visible.
+LibreLock has one version number for the whole project: the same tag goes on this repository and on [librelock-web](https://github.com/LibreLock/librelock-web), and Settings → About shows a single version. Tag both with [`release.sh`](https://github.com/LibreLock/.github/blob/main/release.sh) rather than by hand:
+
+```bash
+./release.sh 0.1.0   # checks both repos are clean and in sync, then tags and pushes v0.1.0 in each
+```
+
+Pushing a `v*` tag runs `.github/workflows/publish.yml`, which builds `linux/amd64` + `linux/arm64` and pushes `ghcr.io/librelock/librelock-server` as `1.2.3`, `1.2`, `1`. Pushes to `main` publish `latest` and `main-<sha>`. Self-hosters run whatever `LIBRELOCK_VERSION` in their `.env` points at.
 
 ## Code style
 

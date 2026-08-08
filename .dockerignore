@@ -2,3 +2,4 @@
 .env
 *.md
 docker-compose.yml
+.github
