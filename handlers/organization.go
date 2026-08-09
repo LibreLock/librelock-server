@@ -122,17 +122,7 @@ func (h *OrganizationHandler) Show(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load organization"})
 		return
 	}
-	payload := h.orgPayload(org)
-	// An organization instance nobody has registered on yet takes its founder without an invite (Register does the same), so the sign-up link has to be findable that once
-	// Mirrors personalRegistration; from the second account on, the stored policy rules
-	if payload["registration"] != models.RegistrationOpen {
-		var users int64
-		h.db.Model(&models.User{}).Count(&users)
-		if users == 0 {
-			payload["registration"] = models.RegistrationOpen
-		}
-	}
-	c.JSON(http.StatusOK, gin.H{"organization": payload})
+	c.JSON(http.StatusOK, gin.H{"organization": h.orgPayload(org)})
 }
 
 // Logo is public; serves the raw logo bytes for <img> tags
