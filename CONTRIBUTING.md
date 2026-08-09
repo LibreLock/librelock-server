@@ -17,6 +17,18 @@ The SQLite file is created automatically at `DB_PATH`, and the server applies sc
 
 Organization tables (roles, invites, audit log, shared vault) are migrated lazily, only once an instance switches to organization mode - so organization-specific code must tolerate those tables not existing at all in personal mode.
 
+### Schema changes
+
+AutoMigrate only diffs the current models against the current tables: it creates tables, adds columns and indexes, and does nothing else. It cannot move data, and it has no memory of what it has already done. Two rules follow.
+
+1. **Anything additive is free.** A new table, a new index, or a new field that is nullable or carries a `default:` lands on existing installs with no extra work. A `not null` field without a default does not - SQLite refuses `ADD COLUMN NOT NULL` with no default, the migration calls `log.Fatalf`, and every instance that pulls it crashloops. **Always give new columns a default.**
+
+2. **Everything else goes in `db/migrations.go`.** Renames, backfills, drops, row rewrites. The list is append-only and its index is the schema version recorded in `app_state.schema_version`, so an install that jumps several releases replays exactly the steps it missed, once each, in order. Never reorder or edit an entry that has shipped; add to the end. Each step runs in its own transaction (SQLite has transactional DDL, so a failure leaves nothing behind) and must be safe on a personal database, where the org tables do not exist - guard with `hasColumn` / a table check the way `dropColumn` does.
+
+A database created by the current boot is stamped straight to head, so historical steps never run against a fresh install. A database stamped *ahead* of the running binary aborts the boot: the schema has moved under code that does not know about it.
+
+Encrypted blobs are the exception to all of this. The server holds no keys, so no migration can touch entry contents - a format change has to happen client-side, keyed off the `version` column on the row, with both formats readable while installs catch up.
+
 ## Versioning
 
 `GET /version` reports the running version. Nothing in this repository records a number: `version/version.go` says `dev`, and CI stamps the real value at link time from the git tag. To stamp a local build the same way:

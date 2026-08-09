@@ -19,6 +19,9 @@ type Config struct {
 	TokenTTL      int
 	AppEnv        string
 	AllowedOrigin string
+	// Snapshot the database into data/backups before a version change migrates it
+	// Off only makes sense where the disk cannot hold a second copy - the snapshot is the only way back from a bad upgrade
+	UpgradeBackups bool
 	// Proxies whose X-Forwarded-For is believed, as a comma-separated list of IPs or CIDRs
 	// Empty means trust none, which is right for a directly exposed server; behind a reverse proxy
 	// it has to be set or every client looks like the proxy and they all share one rate-limit bucket
@@ -32,8 +35,18 @@ func Load() *Config {
 		TokenTTL:       getEnvInt("TOKEN_TTL", 3600),
 		AppEnv:         getEnv("APP_ENV", "development"),
 		AllowedOrigin:  getEnv("ALLOWED_ORIGIN", "http://localhost:1401"),
+		UpgradeBackups: getEnvBool("UPGRADE_BACKUPS", true),
 		TrustedProxies: getEnvList("TRUSTED_PROXIES"),
 	}
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
+	}
+	return fallback
 }
 
 func getEnvList(key string) []string {

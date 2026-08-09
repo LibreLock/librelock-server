@@ -31,30 +31,23 @@ In a normal deployment the frontend proxies `/api` to this server on the same or
 
 The database file holds the entire instance: users, categories, vault entries, sessions, and organization data. Vault contents stay encrypted - the server has never held the keys - but the file also contains every user's Argon2id password hash, so a stolen backup is an offline attack on those hashes, and cracking one eventually unlocks that user's vault. **Keep snapshots off the server and encrypted at rest.**
 
-The commands below take the volume name from `$VOLUME`. Set it once for your setup - `librelock_sqlite_data` under the full [stack](https://github.com/LibreLock/.github/blob/main/compose.yaml), `librelock-server_sqlite_data` when running this repository's Compose file on its own. `docker volume ls` settles it:
+The commands below use the volume name `librelock_sqlite_data`, which is what the full [stack](https://github.com/LibreLock/.github/blob/main/compose.yaml) creates. Running this repository's Compose file on its own it is `librelock-server_sqlite_data` instead. Substitute yours in the commands below.
+
+The database runs in WAL mode, so `librelock.db` on its own is not the whole database - recent writes live in `librelock.db-wal` until they are checkpointed. Snapshot it with SQLite's online-backup API, which reads through an open connection and writes one self-contained file while the server keeps running:
 
 ```bash
-VOLUME=librelock_sqlite_data
+docker run --rm -v librelock_sqlite_data:/data -v .:/out alpine sh -c "apk add -q --no-cache sqlite && sqlite3 /data/librelock.db '.backup /out/librelock-backup.db'"
 ```
 
-The database runs in WAL mode, so `librelock.db` on its own is not the whole database - recent writes live in `librelock.db-wal` until they are checkpointed. Take snapshots with `VACUUM INTO`, which writes one consistent, self-contained file while the server keeps running:
-
-```bash
-docker run --rm -i \
-  -v "$VOLUME:/data" \
-  -v "$PWD:/out" \
-  alpine sh -c "apk add -q --no-cache sqlite && sqlite3 /data/librelock.db" <<EOF
-VACUUM INTO '/out/librelock-$(date +%F).db';
-EOF
-```
+The snapshot lands in the folder you run this from. Every expansion happens inside the container, so that line is identical on Linux, macOS, PowerShell and `cmd` (it needs Docker 23+ for the relative `-v .:/out` mount).
 
 Running without Docker, it is simply:
 
 ```bash
-sqlite3 "$DB_PATH" "VACUUM INTO '/backups/librelock-$(date +%F).db'"
+sqlite3 data/librelock.db ".backup librelock-backup.db"
 ```
 
-Check the snapshot before trusting it - `sqlite3 librelock-2026-01-01.db "PRAGMA integrity_check"` should print `ok`. For scheduled backups, put either command in a script and run it from cron; there is nothing to coordinate with the server.
+Check the snapshot before trusting it - `sqlite3 librelock-backup.db "PRAGMA integrity_check"` should print `ok`. For scheduled backups with a dated filename, see [Backups](https://github.com/LibreLock/.github/blob/main/docs/self-hosting.md#backups), which has the cron and Task Scheduler forms; there is nothing to coordinate with the server either way.
 
 ### Restoring
 
@@ -62,14 +55,13 @@ Restoring replaces the whole instance, so stop the server first. Any stale `-wal
 
 ```bash
 docker compose stop api
-docker run --rm \
-  -v "$VOLUME:/data" \
-  -v "$PWD:/in" \
-  alpine sh -c 'rm -f /data/librelock.db*; cp /in/librelock-2026-01-01.db /data/librelock.db'
+docker run --rm -v librelock_sqlite_data:/data -v .:/in alpine sh -c "rm -f /data/librelock.db*; cp /in/librelock-backup.db /data/librelock.db"
 docker compose start api
 ```
 
-The instance returns to exactly its state at snapshot time: entries created since are gone, deleted ones are back, and sessions that were active then work again. Schema differences are handled on startup by AutoMigrate, so restoring an older snapshot into a newer server is fine; the reverse is not.
+The instance returns to exactly its state at snapshot time: entries created since are gone, deleted ones are back, and sessions that were active then work again. Schema differences are handled on startup, so restoring an older snapshot into a newer server is fine; the reverse is not - a database migrated by a newer release refuses to boot on an older binary rather than let it write.
+
+The server also snapshots itself before any version change migrates the schema, into `backups/` next to the database (`librelock-<old version>-<timestamp>.db`, three kept, disabled with `UPGRADE_BACKUPS=false`). Restore one exactly as above. It lives on the same disk as the original, so it undoes a bad upgrade and nothing else - it is not a substitute for the off-server backups above.
 
 Note that this is separate from the per-user **Export** in the app, which decrypts one vault in the browser into a portable file. That one protects a user who wants their data elsewhere; this one protects the operator whose disk died. Neither substitutes for the other.
 

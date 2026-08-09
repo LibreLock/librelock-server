@@ -20,7 +20,7 @@ import (
 
 func main() {
 	cfg := config.Load()
-	database := db.Connect(cfg.DBPath)
+	database, boot := db.Connect(cfg.DBPath, cfg.UpgradeBackups)
 
 	// Mode is persisted in the database and read live via the provider
 	mode := appmode.New(database)
@@ -30,6 +30,8 @@ func main() {
 		db.MigrateOrg(database)
 		db.EnsureOrgOwner(database)
 	}
+	// Last, so every table exists and the app_state row is there to record how far it got
+	db.RunMigrations(database, boot)
 	log.Printf("librelock %s mode=%s", version.Version, mode.Current())
 
 	// Use JSON tag names in validation error messages
