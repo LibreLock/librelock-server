@@ -1,7 +1,7 @@
 name: publish
 
 # Builds the API image and pushes it to GitHub Container Registry.
-# main -> :latest and :main-<sha>, a v* tag -> :1.2.3, :1.2 and :1
+# main -> :main-<sha>, a v* tag -> :1.2.3, :1.2, :1 and :latest
 on:
   push:
     branches: [main]
@@ -46,11 +46,13 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/librelock/librelock-server
+          # latest follows the newest release, not main: compose defaults to it,
+          #and an untagged main build would report main-<sha> as its version to every install
+          flavor: latest=auto
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=main-,enable={{is_default_branch}}
 
       - uses: docker/build-push-action@v6
