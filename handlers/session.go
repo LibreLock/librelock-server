@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -17,7 +18,9 @@ func NewSessionHandler(db *gorm.DB) *SessionHandler { return &SessionHandler{db:
 func (h *SessionHandler) Index(c *gin.Context) {
 	user := c.MustGet(middleware.UserKey).(*models.User)
 	var sessions []models.Session
-	h.db.Where("user_id = ?", user.ID).Order("last_used_at DESC").Find(&sessions)
+	// Expired rows are dead credentials, not sessions: the list must never show one, whether or not the purge has swept it yet
+	h.db.Where("user_id = ? AND expires_at > ?", user.ID, time.Now()).
+		Order("last_used_at DESC").Find(&sessions)
 	c.JSON(http.StatusOK, gin.H{"sessions": sessions})
 }
 

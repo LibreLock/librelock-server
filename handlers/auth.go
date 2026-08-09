@@ -303,9 +303,12 @@ func (h *AuthHandler) createSession(user *models.User, token string, c *gin.Cont
 	return h.db.Create(&session).Error
 }
 
+// The cookie is a browser-session cookie (no Max-Age): it dies when the browser does
+// The vault key lives in sessionStorage and is already gone by then, so a cookie that outlived the browser could only ever be a locked-out, unusable session sitting in the user's session list
+// TOKEN_TTL still bounds the server side, sliding on use, which is what expires a session left idle
 func (h *AuthHandler) setTokenCookie(c *gin.Context, token string) {
 	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie("token", token, h.ttl, "/", "", h.env == "production", true)
+	c.SetCookie("token", token, 0, "/", "", h.env == "production", true)
 }
 
 func (h *AuthHandler) clearTokenCookie(c *gin.Context) {

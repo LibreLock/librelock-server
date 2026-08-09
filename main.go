@@ -32,6 +32,7 @@ func main() {
 	}
 	// Last, so every table exists and the app_state row is there to record how far it got
 	db.RunMigrations(database, boot)
+	db.StartSessionSweeper(database)
 	log.Printf("librelock %s mode=%s", version.Version, mode.Current())
 
 	// Use JSON tag names in validation error messages
@@ -68,7 +69,7 @@ func main() {
 	sessionH := handlers.NewSessionHandler(database)
 	orgH := handlers.NewOrganizationHandler(database, mode)
 
-	authMW := middleware.Auth(database, cfg.TokenTTL, cfg.AppEnv)
+	authMW := middleware.Auth(database, cfg.TokenTTL)
 
 	r.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "API is running"})
