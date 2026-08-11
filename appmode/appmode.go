@@ -109,7 +109,8 @@ func (p *Provider) EnableOrganization(actorID string) error {
 		if res.RowsAffected == 0 {
 			return errors.New("appmode: owner promotion affected no rows")
 		}
-		// Exactly one owner is an invariant (see models.RoleOwner); demote any stale one
+		// An org can hold several owners, but the account enabling it is the only one at bootstrap;
+		// demote any owner left over from an earlier organization phase
 		if err := p.db.Model(&models.User{}).
 			Where("id <> ? AND role = ?", actorID, models.RoleOwner).
 			UpdateColumn("role", models.RoleAdmin).Error; err != nil {

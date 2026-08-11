@@ -109,7 +109,7 @@ func (h *OrganizationHandler) RevokeMembership(c *gin.Context) {
 		return
 	}
 	if target.Role == models.RoleOwner {
-		c.JSON(http.StatusForbidden, gin.H{"error": "The owner cannot lose shared access"})
+		c.JSON(http.StatusForbidden, gin.H{"error": "An owner cannot lose shared access"})
 		return
 	}
 

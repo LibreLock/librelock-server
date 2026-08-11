@@ -13,8 +13,10 @@ import (
 
 // Audit action identifiers
 const (
-	AuditUserRegistered        = "user.registered"
-	AuditUserRoleChanged       = "user.role_changed"
+	AuditUserRegistered  = "user.registered"
+	AuditUserRoleChanged = "user.role_changed"
+	AuditOwnerAdded      = "user.owner_added"
+	// No longer emitted: ownership is granted, not handed over. Kept so pre-existing log rows resolve.
 	AuditOwnershipTransferred  = "user.ownership_transferred"
 	AuditUserSuspended         = "user.suspended"
 	AuditUserReactivated       = "user.reactivated"

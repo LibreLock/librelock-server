@@ -4,7 +4,6 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 
 	"librelock-server/middleware"
 	"librelock-server/models"
@@ -32,10 +31,15 @@ func (h *OrganizationHandler) countActiveAdmins() int64 {
 	return n
 }
 
-// guardOwner blocks user-management actions against the (protected) owner account
-func guardOwner(c *gin.Context, target *models.User) bool {
-	if target.Role == models.RoleOwner {
-		c.JSON(http.StatusForbidden, gin.H{"error": "The owner account cannot be modified"})
+// guardOwnerTarget gates user-management actions against an owner account. An org can hold several
+// owners and they are peers, so only another owner may act on one. The last-admin guards still apply,
+// which is what keeps an instance manageable.
+func guardOwnerTarget(c *gin.Context, actor, target *models.User) bool {
+	if target.Role != models.RoleOwner {
+		return true
+	}
+	if actor.Role != models.RoleOwner {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Only an owner can modify another owner"})
 		return false
 	}
 	return true
@@ -59,7 +63,7 @@ type updateRoleRequest struct {
 	Role string `json:"role" binding:"required,oneof=owner admin member"`
 }
 
-// UpdateUserRole promotes/demotes a user; role "owner" is an ownership transfer
+// UpdateUserRole promotes/demotes a user; role "owner" adds another owner alongside the existing ones
 func (h *OrganizationHandler) UpdateUserRole(c *gin.Context) {
 	var req updateRoleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -71,14 +75,15 @@ func (h *OrganizationHandler) UpdateUserRole(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !guardOwner(c, target) {
-		return
-	}
 
 	actor := c.MustGet(middleware.UserKey).(*models.User)
 
 	if req.Role == models.RoleOwner {
-		h.transferOwnership(c, actor, target)
+		h.grantOwnership(c, actor, target)
+		return
+	}
+
+	if !guardOwnerTarget(c, actor, target) {
 		return
 	}
 
@@ -86,7 +91,7 @@ func (h *OrganizationHandler) UpdateUserRole(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"user": userSummary(target)})
 		return
 	}
-	if target.Role == models.RoleAdmin && req.Role == models.RoleMember && h.countActiveAdmins() <= 1 {
+	if req.Role == models.RoleMember && models.IsAdminRole(target.Role) && h.countActiveAdmins() <= 1 {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "Cannot demote the last admin"})
 		return
 	}
@@ -101,32 +106,29 @@ func (h *OrganizationHandler) UpdateUserRole(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"user": userSummary(target)})
 }
 
-// transferOwnership atomically makes target the owner and demotes the caller to admin
-func (h *OrganizationHandler) transferOwnership(c *gin.Context, actor, target *models.User) {
+// grantOwnership makes target an owner next to the existing ones; the granting owner keeps their role
+func (h *OrganizationHandler) grantOwnership(c *gin.Context, actor, target *models.User) {
 	if actor.Role != models.RoleOwner {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Only the owner can transfer ownership"})
+		c.JSON(http.StatusForbidden, gin.H{"error": "Only an owner can add another owner"})
+		return
+	}
+	if target.Role == models.RoleOwner {
+		c.JSON(http.StatusOK, gin.H{"user": userSummary(target)})
 		return
 	}
 	if target.Status != models.StatusActive {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "Cannot transfer ownership to a suspended user"})
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "Cannot make a suspended user an owner"})
 		return
 	}
 
-	if err := h.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&models.User{}).Where("id = ?", target.ID).
-			UpdateColumn("role", models.RoleOwner).Error; err != nil {
-			return err
-		}
-		return tx.Model(&models.User{}).Where("id = ?", actor.ID).
-			UpdateColumn("role", models.RoleAdmin).Error
-	}); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to transfer ownership"})
+	prevRole := target.Role
+	if err := h.db.Model(target).UpdateColumn("role", models.RoleOwner).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add owner"})
 		return
 	}
 
 	target.Role = models.RoleOwner
-	recordAudit(h.db, AuditOwnershipTransferred, actor, target.ID, target.Username,
-		actor.Username+" → admin")
+	recordAudit(h.db, AuditOwnerAdded, actor, target.ID, target.Username, prevRole+" → owner")
 	c.JSON(http.StatusOK, gin.H{"user": userSummary(target)})
 }
 
@@ -146,7 +148,8 @@ func (h *OrganizationHandler) UpdateUserStatus(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !guardOwner(c, target) {
+	actor := c.MustGet(middleware.UserKey).(*models.User)
+	if !guardOwnerTarget(c, actor, target) {
 		return
 	}
 
@@ -154,7 +157,7 @@ func (h *OrganizationHandler) UpdateUserStatus(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"user": userSummary(target)})
 		return
 	}
-	if req.Status == models.StatusSuspended && target.Role == models.RoleAdmin && h.countActiveAdmins() <= 1 {
+	if req.Status == models.StatusSuspended && models.IsAdminRole(target.Role) && h.countActiveAdmins() <= 1 {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "Cannot suspend the last admin"})
 		return
 	}
@@ -164,7 +167,6 @@ func (h *OrganizationHandler) UpdateUserStatus(c *gin.Context) {
 		return
 	}
 	target.Status = req.Status
-	actor := c.MustGet(middleware.UserKey).(*models.User)
 
 	if req.Status == models.StatusSuspended {
 		// Force logout everywhere so suspension is immediate, not next-login
@@ -182,11 +184,12 @@ func (h *OrganizationHandler) RemoveUser(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !guardOwner(c, target) {
+	actor := c.MustGet(middleware.UserKey).(*models.User)
+	if !guardOwnerTarget(c, actor, target) {
 		return
 	}
 
-	if target.Role == models.RoleAdmin && h.countActiveAdmins() <= 1 {
+	if models.IsAdminRole(target.Role) && h.countActiveAdmins() <= 1 {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "Cannot remove the last admin"})
 		return
 	}
@@ -196,7 +199,6 @@ func (h *OrganizationHandler) RemoveUser(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove user"})
 		return
 	}
-	actor := c.MustGet(middleware.UserKey).(*models.User)
 	recordAudit(h.db, AuditUserRemoved, actor, id, name, "")
 	c.Status(http.StatusNoContent)
 }
