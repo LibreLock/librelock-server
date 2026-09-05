@@ -38,8 +38,12 @@ func (h *SettingsHandler) UpdateUsername(c *gin.Context) {
 	}
 
 	newUsername := strings.TrimSpace(req.Username)
+	// Excluding the caller's own row is what lets a rename be a no-op, or change only case or
+	// surrounding whitespace: without it the account always collides with itself
 	var count int64
-	h.db.Model(&models.User{}).Where("username = ?", newUsername).Count(&count)
+	h.db.Model(&models.User{}).
+		Where("username = ? AND id != ?", newUsername, user.ID).
+		Count(&count)
 	if count > 0 {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": map[string][]string{
 			"username": {"Username taken"},
@@ -192,6 +196,16 @@ func (h *SettingsHandler) DeleteAccount(c *gin.Context) {
 	ok, err := crypto.VerifyPassword(req.AuthCredential, user.AuthHash)
 	if err != nil || !ok {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Invalid credentials"})
+		return
+	}
+
+	// The same last-admin guard user management enforces: leaving through this door instead of
+	// being removed by someone else would otherwise strand the organization with no one able to
+	// manage users, issue invites, or revert to personal mode
+	if h.mode.IsOrganization() && models.IsAdminRole(user.Role) && countActiveAdmins(h.db) <= 1 {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"error": "You are the last administrator. Promote another admin before deleting your account.",
+		})
 		return
 	}
 

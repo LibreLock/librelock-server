@@ -110,13 +110,18 @@ func main() {
 		cat.PUT("/:id", categoryH.Update)
 		cat.DELETE("/:id", categoryH.Destroy)
 
+		// These three re-authenticate the caller, so each one spends a 64 MiB argon2 hash before it can reject a wrong password
+		// Unlimited, a single session can hold every hash slot (crypto.hashSlots) and stall sign-in for the whole instance, so they get their own bucket
+		// The rest of the group hashes nothing and stays unmetered
+		reauthLimit := middleware.RateLimit(5, 1.0/10.0)
+
 		s := protected.Group("/settings")
 		s.PUT("/username", settingsH.UpdateUsername)
 		s.PUT("/theme", settingsH.UpdateTheme)
-		s.PUT("/password", settingsH.UpdateMasterPassword)
+		s.PUT("/password", reauthLimit, settingsH.UpdateMasterPassword)
 		s.PUT("/keypair", settingsH.UploadKeypair)
-		s.DELETE("/account", settingsH.DeleteAccount)
-		s.PUT("/mode", settingsH.SwitchMode)
+		s.DELETE("/account", reauthLimit, settingsH.DeleteAccount)
+		s.PUT("/mode", reauthLimit, settingsH.SwitchMode)
 		// Instance-wide settings, personal mode only (organization mode covers these in its own area)
 		s.GET("/instance", settingsH.ShowInstance)
 		s.PUT("/registration", settingsH.UpdateRegistration)

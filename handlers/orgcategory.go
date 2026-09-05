@@ -6,7 +6,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"librelock-server/middleware"
 	"librelock-server/models"
 )
 
@@ -16,7 +15,7 @@ func NewOrgCategoryHandler(db *gorm.DB) *OrgCategoryHandler {
 	return &OrgCategoryHandler{db: db}
 }
 
-// Read paths are gated by middleware.RequireMembership; write paths additionally require an admin role (checked inline, since the routes still need membership so the admin holds the org key to encrypt the name)
+// Read paths are gated by middleware.RequireMembership; writes need both shared-vault permissions - a category is structure everyone sees and it files other members' entries (checked inline, since the routes still need membership for the org key)
 
 func (h *OrgCategoryHandler) Index(c *gin.Context) {
 	var categories []models.OrgCategory
@@ -37,17 +36,9 @@ type orgCategoryRequest struct {
 	Name string `json:"name" binding:"required"`
 }
 
-func requireAdminRole(c *gin.Context) bool {
-	user := c.MustGet(middleware.UserKey).(*models.User)
-	if !models.IsAdminRole(user.Role) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Admin access required"})
-		return false
-	}
-	return true
-}
-
 func (h *OrgCategoryHandler) Store(c *gin.Context) {
-	if !requireAdminRole(c) {
+	if !permitsShared(c, h.db, canCurateShared) {
+		denyShared(c, "manage", "categories")
 		return
 	}
 	var req orgCategoryRequest
@@ -64,7 +55,8 @@ func (h *OrgCategoryHandler) Store(c *gin.Context) {
 }
 
 func (h *OrgCategoryHandler) Update(c *gin.Context) {
-	if !requireAdminRole(c) {
+	if !permitsShared(c, h.db, canCurateShared) {
+		denyShared(c, "manage", "categories")
 		return
 	}
 	var category models.OrgCategory
@@ -83,7 +75,8 @@ func (h *OrgCategoryHandler) Update(c *gin.Context) {
 }
 
 func (h *OrgCategoryHandler) Destroy(c *gin.Context) {
-	if !requireAdminRole(c) {
+	if !permitsShared(c, h.db, canCurateShared) {
+		denyShared(c, "manage", "categories")
 		return
 	}
 	var category models.OrgCategory

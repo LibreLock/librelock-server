@@ -22,13 +22,9 @@ func userSummary(u *models.User) map[string]any {
 }
 
 // countActiveAdmins counts logged-in-able admins (owner included) for last-admin guards
+// The count itself lives in helpers.go, shared with the self-deletion guard in settings.go
 func (h *OrganizationHandler) countActiveAdmins() int64 {
-	var n int64
-	h.db.Model(&models.User{}).
-		Where("role IN ? AND status = ?",
-			[]string{models.RoleAdmin, models.RoleOwner}, models.StatusActive).
-		Count(&n)
-	return n
+	return countActiveAdmins(h.db)
 }
 
 // guardOwnerTarget gates user-management actions against an owner account. An org can hold several
