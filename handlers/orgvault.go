@@ -28,6 +28,7 @@ func (h *OrgVaultHandler) orgCategoryExists(id string) bool {
 }
 
 // Access is gated by middleware.RequireMembership, so every member with access sees every shared entry; there is no per-user scoping here by design
+// Writing is narrower: two organization settings decide whether a plain member may manage (add, delete, move out) or edit shared entries. Admins may always do both
 
 func (h *OrgVaultHandler) Index(c *gin.Context) {
 	var entries []models.OrgVault
@@ -53,6 +54,10 @@ type storeOrgVaultRequest struct {
 }
 
 func (h *OrgVaultHandler) Store(c *gin.Context) {
+	if !permitsShared(c, h.db, canManageShared) {
+		denyShared(c, "add", "entries")
+		return
+	}
 	user := c.MustGet(middleware.UserKey).(*models.User)
 	var req storeOrgVaultRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -87,6 +92,10 @@ func (h *OrgVaultHandler) Store(c *gin.Context) {
 }
 
 func (h *OrgVaultHandler) Update(c *gin.Context) {
+	if !permitsShared(c, h.db, canEditShared) {
+		denyShared(c, "edit", "entries")
+		return
+	}
 	var entry models.OrgVault
 	if err := h.db.First(&entry, "id = ?", c.Param("id")).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
@@ -147,6 +156,10 @@ func (h *OrgVaultHandler) Update(c *gin.Context) {
 }
 
 func (h *OrgVaultHandler) Destroy(c *gin.Context) {
+	if !permitsShared(c, h.db, canManageShared) {
+		denyShared(c, "delete", "entries")
+		return
+	}
 	var entry models.OrgVault
 	if err := h.db.First(&entry, "id = ?", c.Param("id")).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})

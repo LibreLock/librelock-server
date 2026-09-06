@@ -25,9 +25,14 @@ type Organization struct {
 	LoginMessage string `gorm:"size:500"                    json:"login_message"`
 	Registration string `gorm:"size:20;not null;default:invite" json:"-"`
 	// When true, a key-holding admin's client grants new members shared-vault access automatically (the server can't envelope the key itself under E2EE)
-	AutoGrantShared bool      `gorm:"column:auto_grant_shared;not null;default:false" json:"auto_grant_shared"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	AutoGrantShared bool `gorm:"column:auto_grant_shared;not null;default:false" json:"auto_grant_shared"`
+	// Shared-vault permissions for plain members; admins may always do both
+	// When false, only admins may add an entry to the shared vault, delete one, or move one back into a private vault
+	MemberManageShared bool `gorm:"column:member_manage_shared;not null;default:false" json:"member_manage_shared"`
+	// When false, only admins may change the contents of an existing shared entry
+	MemberEditShared bool      `gorm:"column:member_edit_shared;not null;default:false" json:"member_edit_shared"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 func (Organization) TableName() string { return "organization" }

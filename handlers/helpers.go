@@ -2,13 +2,48 @@ package handlers
 
 import (
 	"errors"
+	"net/http"
 	"strings"
 
+	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"gorm.io/gorm"
 
+	"librelock-server/middleware"
 	"librelock-server/models"
 )
+
+// permitsShared reports whether the caller may perform a shared-vault write governed by the given
+// organization setting. Admins and owners pass unconditionally; a missing organization row denies,
+// which is the safe direction
+func permitsShared(c *gin.Context, db *gorm.DB, allowed func(*models.Organization) bool) bool {
+	user, ok := c.MustGet(middleware.UserKey).(*models.User)
+	if !ok {
+		return false
+	}
+	if models.IsAdminRole(user.Role) {
+		return true
+	}
+	var org models.Organization
+	if err := db.First(&org, "id = ?", models.OrgSingletonID).Error; err != nil {
+		return false
+	}
+	return allowed(&org)
+}
+
+// The shared vault's two member permissions, from Organization -> Management -> Access
+func canManageShared(o *models.Organization) bool { return o.MemberManageShared }
+
+func canEditShared(o *models.Organization) bool { return o.MemberEditShared }
+
+// Shared categories are both structure and entry content, so they take the two permissions together
+func canCurateShared(o *models.Organization) bool {
+	return o.MemberManageShared && o.MemberEditShared
+}
+
+func denyShared(c *gin.Context, action, subject string) {
+	c.JSON(http.StatusForbidden, gin.H{"error": "Only admins can " + action + " shared " + subject})
+}
 
 // firstAccount returns the oldest account on the instance
 // Personal mode has no roles, so it stands in for the operator: it alone may open sign-up or turn the instance into an organization
@@ -22,6 +57,17 @@ func firstAccount(db *gorm.DB) (models.User, error) {
 func isFirstAccount(db *gorm.DB, userID string) bool {
 	first, err := firstAccount(db)
 	return err == nil && first.ID == userID
+}
+
+// countActiveAdmins counts logged-in-able admins (owner included) for last-admin guards
+// Every path that can remove an admin - demotion, suspension, removal, and self-deletion - has to consult the same count, or an organization can be left with nobody able to administer it
+func countActiveAdmins(db *gorm.DB) int64 {
+	var n int64
+	db.Model(&models.User{}).
+		Where("role IN ? AND status = ?",
+			[]string{models.RoleAdmin, models.RoleOwner}, models.StatusActive).
+		Count(&n)
+	return n
 }
 
 func publicUser(u *models.User) map[string]any {

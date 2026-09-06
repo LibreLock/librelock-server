@@ -72,6 +72,8 @@ func (h *OrganizationHandler) orgPayload(o *models.Organization) map[string]any 
 	p["mode"] = h.mode.Current()
 	p["registration"] = registrationOrDefault(o.Registration)
 	p["auto_grant_shared"] = o.AutoGrantShared
+	p["member_manage_shared"] = o.MemberManageShared
+	p["member_edit_shared"] = o.MemberEditShared
 	return p
 }
 
@@ -79,15 +81,17 @@ func (h *OrganizationHandler) orgPayload(o *models.Organization) map[string]any 
 // registration is "open" only while the instance has no accounts (so the first user can sign up) or after that user opts in
 func (h *OrganizationHandler) personalPayload() map[string]any {
 	return map[string]any{
-		"name":              "LibreLock",
-		"support_email":     "",
-		"support_url":       "",
-		"login_message":     "",
-		"has_logo":          false,
-		"logo_updated_at":   time.Time{},
-		"mode":              config.ModePersonal,
-		"registration":      h.personalRegistration(),
-		"auto_grant_shared": false,
+		"name":                 "LibreLock",
+		"support_email":        "",
+		"support_url":          "",
+		"login_message":        "",
+		"has_logo":             false,
+		"logo_updated_at":      time.Time{},
+		"mode":                 config.ModePersonal,
+		"registration":         h.personalRegistration(),
+		"auto_grant_shared":    false,
+		"member_manage_shared": false,
+		"member_edit_shared":   false,
 	}
 }
 
@@ -139,6 +143,12 @@ func (h *OrganizationHandler) Logo(c *gin.Context) {
 	// Public branding asset embedded by the web app on a different origin, so relax the global same-origin resource policy for this response
 	c.Header("Cross-Origin-Resource-Policy", "cross-origin")
 	c.Header("Cache-Control", "no-cache")
+	// An SVG is a document, and an admin uploading one could put script in it. Browsers apply
+	// Content-Disposition only to navigations, so this turns a direct visit to the logo URL into a
+	// download instead of a render, while <img src> - the only way the app itself loads it - is
+	// untouched. The API's default-src 'none' policy already blocked execution; this stops the
+	// response from depending on that one header staying in place
+	c.Header("Content-Disposition", `attachment; filename="logo"`)
 	c.Data(http.StatusOK, org.LogoMimeType, org.LogoData)
 }
 
@@ -288,16 +298,34 @@ func (h *OrganizationHandler) UpdateRegistration(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"organization": h.orgPayload(org)})
 }
 
+// Both fields are optional pointers: a caller sends only the toggle it changed, and a nil field is left alone
 type updateSharedSettingsRequest struct {
-	AutoGrantShared *bool `json:"auto_grant_shared" binding:"required"`
+	AutoGrantShared    *bool `json:"auto_grant_shared"`
+	MemberManageShared *bool `json:"member_manage_shared"`
+	MemberEditShared   *bool `json:"member_edit_shared"`
 }
 
-// UpdateSharedSettings toggles automatic shared-vault access for new members (admin/owner)
-// The grant itself is performed client-side by a key holder
+func enabledLabel(on bool) string {
+	if on {
+		return "enabled"
+	}
+	return "disabled"
+}
+
+// UpdateSharedSettings toggles the shared-vault policies (admin/owner): automatic access for new
+// members, and whether plain members may manage or edit shared entries
+// Auto-grant is applied client-side by a key holder; the two member permissions are enforced on the
+// org-vault routes as well, so a crafted request cannot walk around the UI
 func (h *OrganizationHandler) UpdateSharedSettings(c *gin.Context) {
 	var req updateSharedSettingsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": validationErrors(err)})
+		return
+	}
+	if req.AutoGrantShared == nil && req.MemberManageShared == nil && req.MemberEditShared == nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": gin.H{
+			"_": []string{"No setting was provided."},
+		}})
 		return
 	}
 	org, err := h.getOrCreate()
@@ -305,17 +333,37 @@ func (h *OrganizationHandler) UpdateSharedSettings(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load organization"})
 		return
 	}
-	if err := h.db.Model(org).UpdateColumn("auto_grant_shared", *req.AutoGrantShared).Error; err != nil {
+
+	columns := map[string]any{}
+	details := []string{}
+	if req.AutoGrantShared != nil {
+		columns["auto_grant_shared"] = *req.AutoGrantShared
+		details = append(details, "auto-grant "+enabledLabel(*req.AutoGrantShared))
+	}
+	if req.MemberManageShared != nil {
+		columns["member_manage_shared"] = *req.MemberManageShared
+		details = append(details, "member manage-shared "+enabledLabel(*req.MemberManageShared))
+	}
+	if req.MemberEditShared != nil {
+		columns["member_edit_shared"] = *req.MemberEditShared
+		details = append(details, "member edit-shared "+enabledLabel(*req.MemberEditShared))
+	}
+	if err := h.db.Model(org).UpdateColumns(columns).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update settings"})
 		return
 	}
-	org.AutoGrantShared = *req.AutoGrantShared
-	actor := c.MustGet(middleware.UserKey).(*models.User)
-	detail := "disabled"
-	if *req.AutoGrantShared {
-		detail = "enabled"
+	if req.AutoGrantShared != nil {
+		org.AutoGrantShared = *req.AutoGrantShared
 	}
-	recordAudit(h.db, AuditSharedSettingsChanged, actor, "", "", "auto-grant "+detail)
+	if req.MemberManageShared != nil {
+		org.MemberManageShared = *req.MemberManageShared
+	}
+	if req.MemberEditShared != nil {
+		org.MemberEditShared = *req.MemberEditShared
+	}
+
+	actor := c.MustGet(middleware.UserKey).(*models.User)
+	recordAudit(h.db, AuditSharedSettingsChanged, actor, "", "", strings.Join(details, ", "))
 	c.JSON(http.StatusOK, gin.H{"organization": h.orgPayload(org)})
 }
 
