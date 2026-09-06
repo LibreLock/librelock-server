@@ -324,7 +324,7 @@ func (h *OrganizationHandler) UpdateSharedSettings(c *gin.Context) {
 	}
 	if req.AutoGrantShared == nil && req.MemberManageShared == nil && req.MemberEditShared == nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": gin.H{
-			"auto_grant_shared": []string{"No setting was provided."},
+			"_": []string{"No setting was provided."},
 		}})
 		return
 	}
