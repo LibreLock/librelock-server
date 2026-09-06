@@ -32,7 +32,7 @@ func (h *OrgVaultHandler) orgCategoryExists(id string) bool {
 
 func (h *OrgVaultHandler) Index(c *gin.Context) {
 	var entries []models.OrgVault
-	h.db.Order("created_at asc").Find(&entries)
+	h.db.Order("created_at asc, id asc").Find(&entries)
 	c.JSON(http.StatusOK, gin.H{"entries": entries})
 }
 

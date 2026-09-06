@@ -20,7 +20,7 @@ func NewVaultHandler(db *gorm.DB) *VaultHandler { return &VaultHandler{db: db} }
 func (h *VaultHandler) Index(c *gin.Context) {
 	user := c.MustGet(middleware.UserKey).(*models.User)
 	var entries []models.Vault
-	h.db.Where("user_id = ?", user.ID).Find(&entries)
+	h.db.Where("user_id = ?", user.ID).Order("created_at asc, id asc").Find(&entries)
 	c.JSON(http.StatusOK, gin.H{"entries": entries})
 }
 
