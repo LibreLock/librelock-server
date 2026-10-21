@@ -63,7 +63,9 @@ func auditSummary(a *models.AuditEvent) map[string]any {
 	}
 }
 
-// ListAuditEvents returns recent audit entries newest first (admin only)
+// ListAuditEvents returns audit entries newest first, one page at a time (admin only)
+// The log only grows, so it is paged server-side: ?limit (1-500, default 100) and ?offset,
+// with the full count in "total" so the client can show where it is
 func (h *OrganizationHandler) ListAuditEvents(c *gin.Context) {
 	limit := 100
 	if v := c.Query("limit"); v != "" {
@@ -71,8 +73,20 @@ func (h *OrganizationHandler) ListAuditEvents(c *gin.Context) {
 			limit = n
 		}
 	}
+	offset := 0
+	if v := c.Query("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	var total int64
+	if err := h.db.Model(&models.AuditEvent{}).Count(&total).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load audit log"})
+		return
+	}
 	var events []models.AuditEvent
-	if err := h.db.Order("created_at desc").Limit(limit).Find(&events).Error; err != nil {
+	// id breaks ties so rows written in the same instant never repeat or vanish across pages
+	if err := h.db.Order("created_at desc, id desc").Limit(limit).Offset(offset).Find(&events).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load audit log"})
 		return
 	}
@@ -80,5 +94,5 @@ func (h *OrganizationHandler) ListAuditEvents(c *gin.Context) {
 	for i := range events {
 		out = append(out, auditSummary(&events[i]))
 	}
-	c.JSON(http.StatusOK, gin.H{"events": out})
+	c.JSON(http.StatusOK, gin.H{"events": out, "total": total})
 }

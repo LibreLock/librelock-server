@@ -16,6 +16,8 @@ const (
 	UserKey      = "user"
 	SessionIDKey = "session_id"
 	TokenKey     = "token"
+
+	SessionExpiresHeader = "X-Session-Expires"
 )
 
 func Auth(db *gorm.DB, ttl int) gin.HandlerFunc {
@@ -37,10 +39,15 @@ func Auth(db *gorm.DB, ttl int) gin.HandlerFunc {
 		updates := map[string]any{"last_used_at": now}
 		// Sliding expiration: an active user should never be logged out mid-session Once past the halfway point of the window, push the expiry forward
 		// Nothing to refresh on the cookie: it carries no Max-Age and lives exactly as long as the browser session
+		expiresAt := session.ExpiresAt
 		if ttl > 0 && time.Until(session.ExpiresAt) < time.Duration(ttl)*time.Second/2 {
-			updates["expires_at"] = now.Add(time.Duration(ttl) * time.Second)
+			expiresAt = now.Add(time.Duration(ttl) * time.Second)
+			updates["expires_at"] = expiresAt
 		}
 		db.Model(&session).Updates(updates)
+		// Lets an open tab sign itself out the moment the session lapses instead of finding out on
+		// the next save. Reading it never extends anything; only real requests slide the window
+		c.Header(SessionExpiresHeader, expiresAt.UTC().Format(time.RFC3339))
 
 		var user models.User
 		if err := db.First(&user, "id = ?", session.UserID).Error; err != nil {
